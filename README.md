@@ -8,11 +8,10 @@ Every attention head does two jobs with one set of vectors: retrieval and transm
 
 This repository has:
 
-1. The mechanism — one modified attention equation ([`src/model.py`](src/model.py), single file);
-2. A sterile comparison: identical data order, init backbone, objective and schedule for base/HLA twins ([`docs/STERILITY.md`](docs/STERILITY.md));
-3. Theory: 9 theorems incl. RoPE-commutation ([`docs/THEORY.md`](docs/THEORY.md));
-4. Pre-registered experiment design H1–H5 ([`docs/EXPERIMENT_CARD.md`](docs/EXPERIMENT_CARD.md));
-5. Every logged metric documented ([`docs/METRICS.md`](docs/METRICS.md)); data provenance pinned by revision + sha256 ([`docs/DATA_CARD.md`](docs/DATA_CARD.md)).
+1. The mechanism - one modified attention equation ([`src/model.py`](src/model.py));
+2. A sterile comparison ([`docs/STERILITY.md`](docs/STERILITY.md));
+3. Theory: 9 theorems ([`docs/THEORY.md`](docs/THEORY.md));
+5. Every metric documented ([`docs/METRICS.md`](docs/METRICS.md)).
 
 
 
@@ -21,7 +20,7 @@ This repository has:
 ```bash
 git clone https://github.com/fanat503/Laplace-attention.git
 cd Laplace-attention
-pip install -r requirements.txt        # CPU is enough for tests
+pip install -r requirements.txt        # CPU is ok for tests
 
 python -m pytest tests/ -q      
 python scripts/audit_sterility.py      
@@ -51,4 +50,4 @@ python scripts/make_ablation_configs.py \
 
 If you use this code, please cite it via [`CITATION.cff`](CITATION.cff).
 
-**Apache-2.0** · Independent research; replications and compute support welcome — open an issue.
+**Apache-2.0** · Independent research; replications and compute support welcome.
