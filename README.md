@@ -2,8 +2,6 @@
 
 # HLA: Holographic Laplace Attention
 
-Separating finding tokens from transmitting them in attention
-
 </div>
 
 Every attention head does two jobs with one set of vectors: retrieval and transmission. They interfere. HLA gives each job its own channel.
