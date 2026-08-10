@@ -50,4 +50,4 @@ python scripts/make_ablation_configs.py \
 
 If you use this code, please cite it via [`CITATION.cff`](CITATION.cff).
 
-**Apache-2.0** · Independent research; replications and compute support welcome.
+**Apache-2.0** · Independent research; replications and compute support welcome
