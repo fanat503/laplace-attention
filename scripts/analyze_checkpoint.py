@@ -247,7 +247,8 @@ def induction_by_distance(model: GPT, cfg: Dict[str, Any], *, distances: List[in
         vals = []
         for s in range(0, batch_size, chunk):
             logits, _ = model(toks[s:s + chunk])
-            probs = torch.softmax(logits[:, pos_a2, :].float(), dim=-1)
+            from src.eval import _mask_padded_logits  # finding #19
+            probs = torch.softmax(_mask_padded_logits(model, logits[:, pos_a2, :].float()), dim=-1)
             vals.append(probs.gather(1, target[s:s + chunk, None]))
             del logits, probs
         out[str(dist)] = float(torch.cat(vals).mean().detach().cpu().item())
@@ -363,6 +364,24 @@ def main() -> None:
         result["positional_recall"] = positional_recall_curve(model, device=device)
     except Exception as e:
         result["positional_recall"] = {"error": str(e)}
+    try:
+        from src.eval import per_position_loss_curve
+        ds2 = FixedDataset(
+            cfg["val_path"],
+            cfg["model"]["block_size"],
+            expected_vocab_size=cfg.get("expected_vocab_size", cfg["model"].get("vocab_size")),
+        )
+        n = min(len(ds2), 32)
+        toks = torch.stack([ds2[i]["input_ids"] for i in range(n)])
+        result["per_position_loss"] = per_position_loss_curve(model, toks, device=device)
+    except Exception as e:
+        result["per_position_loss"] = {"error": str(e)}
+    try:
+        from src.eval import attention_sink_stats, activation_outlier_stats
+        result["attention_sink"] = attention_sink_stats(model, device=device)
+        result["activation_outliers"] = activation_outlier_stats(model, device=device)
+    except Exception as e:
+        result["attention_sink"] = {"error": str(e)}
 
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     with open(args.out, "w", encoding="utf-8") as f:

@@ -50,7 +50,7 @@ def orth_basis_columns(A: torch.Tensor, k: int | None = None, eps: float = 1e-6)
     """Basis for column space of A [d_out, d_in]."""
     A = A.float()
     U, S, _ = torch.linalg.svd(A, full_matrices=False)
-    rank = int((S > eps * S.max().clamp_min(eps)).sum().item()) if S.numel() else 0
+    rank = int((eps * S.max().clamp_min(eps) < S).sum().item()) if S.numel() else 0
     if k is not None:
         rank = min(rank, k)
     return U[:, :rank].contiguous()
@@ -60,7 +60,7 @@ def orth_basis_rows(A: torch.Tensor, k: int | None = None, eps: float = 1e-6) ->
     """Basis for row space of A [d_out, d_in] as vectors in R^d_in."""
     A = A.float()
     _, S, Vh = torch.linalg.svd(A, full_matrices=False)
-    rank = int((S > eps * S.max().clamp_min(eps)).sum().item()) if S.numel() else 0
+    rank = int((eps * S.max().clamp_min(eps) < S).sum().item()) if S.numel() else 0
     if k is not None:
         rank = min(rank, k)
     return Vh[:rank, :].T.contiguous()

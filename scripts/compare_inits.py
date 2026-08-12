@@ -25,12 +25,32 @@ def load_state(path: str) -> Dict[str, torch.Tensor]:
     return payload["model"] if isinstance(payload, dict) and "model" in payload else payload
 
 
+def load_role(path: str):
+    payload = torch.load(path, map_location="cpu", weights_only=False)
+    return payload.get("role") if isinstance(payload, dict) else None
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", required=True)
     ap.add_argument("--hla", required=True)
     ap.add_argument("--allow-shape-mismatch", action="store_true")
     args = ap.parse_args()
+
+    # Finding #17 (mutation testing): the tensor checks are provably blind to
+    # a role swap - base-as-hla and swapped args both passed, because the
+    # shared-backbone tensors are bit-identical BY DESIGN. A swapped pair
+    # trains the wrong variant from the right weights and the whole sterile
+    # comparison silently dies. make_init stamps `role`; enforce it here.
+    role_b, role_h = load_role(args.base), load_role(args.hla)
+    if role_b is not None and "base" not in str(role_b):
+        raise RuntimeError(
+            f"--base file has role={role_b!r} (expected a base init). "
+            f"Arguments swapped?")
+    if role_h is not None and "hla" not in str(role_h):
+        raise RuntimeError(
+            f"--hla file has role={role_h!r} (expected an hla init). "
+            f"Arguments swapped?")
 
     base = load_state(args.base)
     hla = load_state(args.hla)

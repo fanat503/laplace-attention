@@ -370,7 +370,7 @@ class CausalSelfAttention(nn.Module):
         B, T, C = x.size()
         hs = self.head_dim
 
-        if T > self.mask.size(-1):
+        if self.mask.size(-1) < T:
             raise ValueError(f"block_size {self.mask.size(-1)}")
 
         qkv = self.c_attn(x)
@@ -465,7 +465,7 @@ class CausalSelfAttention(nn.Module):
 
 
         if self.use_laplace and self.laplace_alpha != 0.0:
-            
+
             gate_k = torch.tanh(self.W_gate_k(x)).float()  # (B, T, H)
             range_k = (self.laplace_range_k * layer_mult) * (
                 1.0 + self.range_flex * torch.tanh(self.W_range_k.float())
@@ -918,7 +918,7 @@ class GPT(nn.Module):
 
     def forward(self, idx: torch.Tensor, targets: Optional[torch.Tensor] = None) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         B, T = idx.size()
-        if T > self.config.block_size:
+        if self.config.block_size < T:
             raise ValueError(f"Sequence length {T} exceeds block_size {self.config.block_size}")
 
         tok = self.transformer.wte(idx)  # (B, T, C)

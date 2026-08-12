@@ -34,6 +34,29 @@ H5 (CAUSAL, the Oral experiment): transplanting the trained HLA retrieval
     narrative must be revised (reported either way). Ladder position: run
     immediately after the first trained 200M pair.
 
+    H5-A (reverse / necessity, pre-registered BEFORE any pair was trained):
+    the mirror transplant (HLA body + base retrieval, --direction reverse)
+    must COLLAPSE the gain: reverse closure <50% (franken_rev falls toward
+    base) if retrieval geometry is necessary. Forward >50% AND reverse ALSO
+    >50% would mean the V/MLP path compensates - the boundary story is then
+    revised and reported honestly. Both directions ship in one run
+    (--direction both).
+
+    H4-P (linear-access probe, pre-registered before any trained pair):
+    scripts/train_probe.py decodes the needle identity from the residual
+    stream at the query position across depths. Reading: HLA's
+    probe_litm_gap (edge - middle accuracy at best layer) is closer to 0
+    than base's => mid-context info is genuinely more linearly accessible.
+    Runs post-hoc on any checkpoint; report alongside pos_XX curves.
+
+    H5-B (two-level evidence, pre-registered likewise): gap closure is
+    computed on FIVE metrics - the four behavioral probes plus
+    snr_needle_last (activation-level attention SNR). P(B)-style probes can
+    in principle be moved by the transmission path; snr_needle moves only
+    if the score geometry itself concentrates on the target. A franken that
+    inherits both the behavioral gap AND the SNR gap closes the causal
+    chain on two independent measurement levels.
+
 ## Active mechanism sets per config (B6: capacity vs default)
 
 The codebase implements SEVEN mechanisms; shipped training configs activate a
@@ -66,6 +89,16 @@ Dataset-size note (pre-registered): the Kaggle working-dir limit (19.5 GB)
 caps the Kaggle dataset at 4.7B stored tokens => 200M Kaggle runs use
 max_steps 17900 (4.69B tokens). The month-TPU dataset (28B+) removes this
 cap; TPU 200M runs use the original 20000 steps. Both are reported as-is.
+
+**Budget amendment (2026-08, pre-run, after v5e-8 speed measurement):** the
+measured steady-state speed (V4 smoke: 0.53 steps/s at b=1/accum=16,
+262,144 tokens/update) does not fit 17900 steps into one 9h batch session.
+The headline Kaggle pair therefore uses **kaggle_200m_{base,hla}_9h_s42:
+max_steps 15000 = 3.93B tokens = 18.1 tok/param** (still Chinchilla-range),
+identical for both twins; autoresume (resume_every=500) covers slowdowns.
+Pre-registered fallback if V6 measures < 0.48 steps/s: cut BOTH twins to
+13000 steps (3.4B tokens) — never one twin alone. The 17900/20000 plans
+remain for the month-TPU stage.
 
 ## Pre-registered decision rules for architecture simplification
 
@@ -117,3 +150,26 @@ criticism and post-hoc cherry-picking):
 | Date | Deviation | Reason |
 |---|---|---|
 | (none yet) | | |
+
+## Post-registration additions (2026-08-11, before any headline run)
+
+Added to the evaluation suite BEFORE the first 200m pair exists (so these
+are pre-registered too, with calibration tests where applicable):
+
+- **Passkey retrieval at full window** (`scripts/eval_passkey.py`): the
+  external-anchor task (Mohtashami & Jaggi). Pre-registered reading: HLA's
+  passkey_middle_vs_edge sag is no worse than base's, and mean exact-match
+  is >= base's at equal tokens. Calibration: 0.000 at random init (tested).
+- **H5 power fields**: every gap-closure record carries
+  min_detectable_gap_z3 / gap_over_noise_z / powered. Pre-registered rule:
+  closures with powered = 0 are reported but carry NO causal claim.
+- **Per-head induction census** (fig10): descriptive, no threshold —
+  reported for both twins at the final checkpoint.
+- **Mechanism wake order**: analytical property (∂mix/∂range = 0 at
+  gate = 0). Pre-registered check on fig5: range-parameter trajectories
+  lag gate trajectories; if they do NOT (ranges move while gates are
+  ~0), that falsifies our reading of the parameterization and must be
+  reported as an anomaly.
+- **Second seed pair** (kaggle_200m_{base,hla}_9h_s43): same protocol,
+  seed 43; pre-registered use: sign-stability check of the headline
+  deltas, not a new hypothesis.

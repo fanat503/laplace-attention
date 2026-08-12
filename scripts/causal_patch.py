@@ -55,6 +55,7 @@ if ROOT not in sys.path:
 
 from src.model import GPT, GPTConfig  # noqa: E402
 from src.eval import (  # noqa: E402
+    attention_needle_snr,
     evaluate_induction,
     evaluate_distractor_induction,
     positional_recall_curve,
@@ -76,31 +77,59 @@ def load_state(path: str) -> Dict[str, torch.Tensor]:
     except Exception:
         payload = torch.load(path, map_location="cpu", weights_only=False)
     state = payload.get("model", payload) if isinstance(payload, dict) else payload
-    return {k: (v.float() if torch.is_tensor(v) and torch.is_floating_point(v) else v)
-            for k, v in state.items()}
+    out = {k: (v.float() if torch.is_tensor(v) and torch.is_floating_point(v) else v)
+           for k, v in state.items()}
+    # Finding #21: a loss-spike NaN that leaks into a saved checkpoint used
+    # to flow SILENTLY through every probe (JSON full of nan presented as a
+    # "result"). H5 inputs must be finite or the experiment is void.
+    bad = [k for k, v in out.items()
+           if torch.is_tensor(v) and torch.is_floating_point(v)
+           and not torch.isfinite(v).all()]
+    if bad:
+        raise SystemExit(
+            f"checkpoint {path} contains non-finite weights in {len(bad)} "
+            f"tensors (first: {bad[0]}) - refusing to run causal patching "
+            f"on a corrupted model")
+    return out
 
 
 def build_franken(base_state: Dict[str, torch.Tensor],
                   hla_state: Dict[str, torch.Tensor],
                   n_embd: int,
-                  transplant: str) -> Dict[str, torch.Tensor]:
-    """Start from BASE everywhere, splice HLA's retrieval side in."""
+                  transplant: str,
+                  donor: str = "hla") -> Dict[str, torch.Tensor]:
+    """Splice the retrieval side of DONOR into the other twin's body.
+
+    donor="hla" (forward): base body + HLA retrieval - the SUFFICIENCY test
+      (does HLA's retrieval geometry carry the gain into a base body?).
+    donor="base" (reverse / anti-franken): HLA body + base retrieval - the
+      NECESSITY test (does removing HLA's retrieval geometry collapse the
+      gain?). Pre-registered reading: forward closure >50% AND reverse
+      closure <50% (gain collapses toward base) => retrieval geometry is
+      both sufficient and necessary. Forward high but reverse ALSO high
+      => the V/MLP path compensates - the boundary story needs revision;
+      report honestly.
+    """
     if set(base_state) != set(hla_state):
         raise ValueError("state dict key sets differ - not a sterile pair")
+    if donor == "hla":
+        body, graft = base_state, hla_state
+    elif donor == "base":
+        body, graft = hla_state, base_state
+    else:
+        raise ValueError(f"unknown donor: {donor}")
     if transplant == "full":
-        return dict(hla_state)
+        return dict(graft)
 
-    out = {k: v.clone() if torch.is_tensor(v) else v for k, v in base_state.items()}
-    for key in hla_state:
+    out = {k: v.clone() if torch.is_tensor(v) else v for k, v in body.items()}
+    for key in graft:
         if ".c_attn.weight" in key:
             # rows [0:2C] = Q,K (retrieval); rows [2C:3C] = V (transmission)
             spliced = out[key].clone()
-            spliced[: 2 * n_embd] = hla_state[key][: 2 * n_embd]
+            spliced[: 2 * n_embd] = graft[key][: 2 * n_embd]
             out[key] = spliced
-        elif transplant in ("phase", "retrieval") and any(p in key for p in PHASE_KEYS):
-            out[key] = hla_state[key].clone()
-        elif transplant == "retrieval" and any(p in key for p in RETRIEVAL_MECH_KEYS):
-            out[key] = hla_state[key].clone()
+        elif transplant in ("phase", "retrieval") and any(p in key for p in PHASE_KEYS) or transplant == "retrieval" and any(p in key for p in RETRIEVAL_MECH_KEYS):
+            out[key] = graft[key].clone()
     return out
 
 
@@ -122,6 +151,15 @@ def probe(model: GPT, device: str = "cpu", seed: int = 42,
                     for k, v in positional_recall_curve(
                         model, device=device, seed=seed,
                         batch_size=max(2, batch_size // 2)).items()})
+    except Exception:
+        pass
+    # B-extension: activation-level SNR. P(B) can move through the V-path;
+    # snr_needle moves ONLY if the score geometry concentrates. A franken
+    # that inherits BOTH closes the causal story on two independent levels.
+    try:
+        out.update({str(k): float(v) for k, v in attention_needle_snr(
+            model, device=device, seed=seed,
+            batch_size=max(2, batch_size // 2)).items()})
     except Exception:
         pass
     return out
@@ -153,7 +191,7 @@ def probe_multi(model: GPT, device: str = "cpu", seeds=(42, 43, 44, 45, 46),
 
 
 GAP_METRICS = ("induction", "distractor_induction", "distractor_margin",
-               "posrec_litm_worst_frac")
+               "posrec_litm_worst_frac", "snr_needle_last")
 # Pre-registered (EXPERIMENT_CARD H5): >50% closure on retrieval probes =>
 # retrieval geometry CAUSES the gain; <20% => story is NOT causal - report so.
 MIN_MEANINGFUL_GAP = 1e-4
@@ -183,6 +221,13 @@ def gap_closure(base: Dict[str, float], hla: Dict[str, float],
             noise = max(base.get(f"{m}_std", 0.0), hla.get(f"{m}_std", 0.0),
                         franken.get(f"{m}_std", 0.0))
             rec["closure_std_bound"] = 3.0 * noise / abs(gap)
+            # R2-Q2 mitigation (power): the smallest gap this probe set can
+            # attribute at z=3. If |gap| < mdg the closure number is inside
+            # probe noise - the JSON says so explicitly instead of letting a
+            # reader over-trust a percentage.
+            rec["min_detectable_gap_z3"] = 3.0 * noise
+            rec["gap_over_noise_z"] = abs(gap) / noise if noise > 0 else float("inf")
+            rec["powered"] = 1.0 if (noise == 0.0 or abs(gap) >= 3.0 * noise) else 0.0
         out[m] = rec
     return out
 
@@ -200,36 +245,70 @@ def main() -> None:
     ap.add_argument("--probe-seeds", default="42,43,44,45,46",
                     help="comma-separated probe seeds (error bars for H5)")
     ap.add_argument("--probe-batch", type=int, default=8)
+    ap.add_argument("--direction", default="both",
+                    choices=["forward", "reverse", "both"],
+                    help="forward: base body + HLA retrieval (sufficiency); "
+                         "reverse: HLA body + base retrieval (necessity)")
     args = ap.parse_args()
+
+    # Parse seeds BEFORE loading checkpoints: on a 200m pair the loads take
+    # minutes - a typo in --probe-seeds must fail in milliseconds, not after.
+    try:
+        seeds = tuple(int(s) for s in args.probe_seeds.split(","))
+        if not seeds:
+            raise ValueError("empty")
+    except ValueError:
+        raise SystemExit(
+            f"--probe-seeds must be comma-separated ints, "
+            f"got {args.probe_seeds!r}") from None
 
     cfg = json.load(open(args.hla_config, encoding="utf-8"))["model"]
     base_state = load_state(args.base_checkpoint)
     hla_state = load_state(args.hla_checkpoint)
-    franken_state = build_franken(base_state, hla_state, int(cfg["n_embd"]), args.transplant)
-
     results: Dict[str, Dict[str, float]] = {}
-    seeds = tuple(int(s) for s in args.probe_seeds.split(","))
-    for name, state in (("base", base_state), ("hla", hla_state), ("franken", franken_state)):
+
+    arms = [("base", base_state), ("hla", hla_state)]
+    if args.direction in ("forward", "both"):
+        arms.append(("franken", build_franken(
+            base_state, hla_state, int(cfg["n_embd"]), args.transplant, donor="hla")))
+    if args.direction in ("reverse", "both"):
+        arms.append(("franken_rev", build_franken(
+            base_state, hla_state, int(cfg["n_embd"]), args.transplant, donor="base")))
+
+    for name, state in arms:
         model = GPT(GPTConfig(**cfg)).eval()
         model.load_state_dict(state, strict=True)
         results[name] = probe_multi(model, device=args.device, seeds=seeds,
                                     batch_size=args.probe_batch)
-        print(f"{name:8s}: " + "  ".join(f"{k}={v:.5f}" for k, v in results[name].items()
-                                         if isinstance(v, float) and "pos_" not in k
-                                         and not k.endswith("_std")))
+        print(f"{name:12s}: " + "  ".join(f"{k}={v:.5f}" for k, v in results[name].items()
+                                          if isinstance(v, float) and "pos_" not in k
+                                          and not k.endswith("_std")))
 
-    closure = gap_closure(results["base"], results["hla"], results["franken"])
-    results["gap_closure"] = closure  # type: ignore[assignment]
-    print("\n=== H5 gap closure (pre-registered: >0.50 causal, <0.20 not) ===")
-    for m, rec in closure.items():
-        if rec.get("closure_note"):
-            print(f"  {m:24s}: gap={rec['gap']:+.6f} TOO SMALL to attribute (no claim)")
-        else:
-            print(f"  {m:24s}: closure={rec['closure']:+.3f} "
-                  f"(±{rec.get('closure_std_bound', float('nan')):.3f}) "
-                  f"gap={rec['gap']:+.6f}")
+    if "franken" in results:
+        closure = gap_closure(results["base"], results["hla"], results["franken"])
+        results["gap_closure"] = closure  # type: ignore[assignment]
+        print("\n=== H5 FORWARD closure (sufficiency; pre-reg: >0.50 causal, <0.20 not) ===")
+        for m, rec in closure.items():
+            if rec.get("closure_note"):
+                print(f"  {m:24s}: gap={rec['gap']:+.6f} TOO SMALL to attribute (no claim)")
+            else:
+                print(f"  {m:24s}: closure={rec['closure']:+.3f} "
+                      f"(±{rec.get('closure_std_bound', float('nan')):.3f}) "
+                      f"gap={rec['gap']:+.6f}")
+    if "franken_rev" in results:
+        closure_r = gap_closure(results["base"], results["hla"], results["franken_rev"])
+        results["gap_closure_reverse"] = closure_r  # type: ignore[assignment]
+        print("\n=== H5 REVERSE closure (necessity; pre-reg: <0.50 = gain collapses) ===")
+        for m, rec in closure_r.items():
+            if rec.get("closure_note"):
+                print(f"  {m:24s}: gap={rec['gap']:+.6f} TOO SMALL to attribute (no claim)")
+            else:
+                print(f"  {m:24s}: closure={rec['closure']:+.3f} "
+                      f"(±{rec.get('closure_std_bound', float('nan')):.3f}) "
+                      f"gap={rec['gap']:+.6f}")
 
     results["meta"] = {"transplant": args.transplant,  # type: ignore[assignment]
+                       "direction": args.direction,
                        "base_checkpoint": args.base_checkpoint,
                        "hla_checkpoint": args.hla_checkpoint,
                        "probe_seeds": list(seeds),

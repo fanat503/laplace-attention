@@ -33,9 +33,19 @@ def read_log(path: str) -> Dict[str, List[float]]:
             if header is None:
                 header = row
             else:
-                rows.append(dict(zip(header, row)))
+                rows.append(dict(zip(header, row, strict=False)))  # ragged rows allowed pre-crash
     if header is None:
         raise RuntimeError(f"No header in {path}")
+    # Autoresume seams (finding #14): a resumed run re-logs steps from the
+    # resume checkpoint. Keep-LAST per step, else every seam draws a sawtooth.
+    dedup: Dict[str, Dict[str, str]] = {}
+    order: List[str] = []
+    for r in rows:
+        s = r.get("step", "")
+        if s not in dedup:
+            order.append(s)
+        dedup[s] = r
+    rows = [dedup[s] for s in order]
     out: Dict[str, List[float]] = {k: [] for k in header}
     for r in rows:
         for k in header:
@@ -134,13 +144,13 @@ def plot_mechanism_dashboard(logs: Dict[str, Dict[str, List[float]]], out: str) 
     fig, axes = plt.subplots(nrows, 2, figsize=(13, 4 * nrows))
     for extra_ax in list(axes.flat)[len(MECHANISM_PANELS):]:
         extra_ax.set_visible(False)
-    for ax, (title, ylabel, cols) in zip(axes.flat, MECHANISM_PANELS):
+    for ax, (title, ylabel, cols) in zip(axes.flat, MECHANISM_PANELS, strict=False):  # grid may exceed panels
         drew = False
         for name, log in logs.items():
             x = log.get("tokens_seen", [])
             for col in cols:
                 ys = log.get(col, [])
-                pairs = [(xi, yi) for xi, yi in zip(x, ys) if not math.isnan(yi)]
+                pairs = [(xi, yi) for xi, yi in zip(x, ys, strict=True) if not math.isnan(yi)]
                 if not pairs:
                     continue
                 ax.plot([p[0] for p in pairs], [p[1] for p in pairs],

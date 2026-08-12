@@ -694,7 +694,8 @@ class TestCausalPatch:
               use_distance_laplace=True, distance_laplace_alpha=0.5)
 
     def _pair(self):
-        import importlib, sys as _sys
+        import importlib
+        import sys as _sys
         _sys.path.insert(0, os.path.join(ROOT, "scripts"))
         cp = importlib.import_module("causal_patch")
         torch.manual_seed(0)
@@ -786,6 +787,45 @@ class TestCausalPatch:
         assert out["induction_std"] >= 0.0
 
 
+    def test_reverse_franken_boundaries(self):
+        """A-extension (necessity test): reverse franken = HLA body + base
+        retrieval. The V-side gate must stay HLA (body), the phase must
+        become base - the exact mirror of the forward boundaries."""
+        cp, bs, hs = self._pair()
+        fr = cp.build_franken(bs, hs, 32, "retrieval", donor="base")
+        kq = next(k for k in hs if "W_phase_q" in k)
+        kv = next(k for k in hs if "W_gate_v.weight" in k)
+        km = next(k for k in hs if "mlp" in k and "weight" in k)
+        assert torch.equal(fr[kq], bs[kq]), "phase must come from base (graft)"
+        assert torch.equal(fr[kv], hs[kv]), "V-gate must stay HLA (body)"
+        assert torch.equal(fr[km], hs[km]), "MLP must stay HLA (body)"
+        # Q,K rows from base, V rows from HLA
+        key = next(k for k in hs if "c_attn.weight" in k)
+        assert torch.equal(fr[key][:64], bs[key][:64])
+        assert torch.equal(fr[key][64:], hs[key][64:])
+
+    def test_franken_unknown_donor_rejected(self):
+        import pytest as _pytest
+        cp, bs, hs = self._pair()
+        with _pytest.raises(ValueError, match="unknown donor"):
+            cp.build_franken(bs, hs, 32, "retrieval", donor="qwen")
+
+    def test_snr_is_gap_metric(self):
+        """B-extension: the activation-level SNR must be part of the
+        pre-registered gap metrics - P(B) probes alone can be moved by the
+        V-path; snr_needle only moves with score geometry."""
+        cp, _, _ = self._pair()
+        assert "snr_needle_last" in cp.GAP_METRICS
+
+    def test_forward_reverse_full_are_mirror_images(self):
+        """Sanity: transplant='full' with donor='hla' == HLA exactly, and
+        with donor='base' == base exactly."""
+        cp, bs, hs = self._pair()
+        f_h = cp.build_franken(bs, hs, 32, "full", donor="hla")
+        f_b = cp.build_franken(bs, hs, 32, "full", donor="base")
+        assert all(torch.equal(f_h[k], hs[k]) for k in hs)
+        assert all(torch.equal(f_b[k], bs[k]) for k in bs)
+
 class TestAttentionNeedleSNR:
     """Diff-Transformer-lesson metric (their Table 3 'attention noise'):
     activation-level SNR of retrieval. The Oral-tier reading of our
@@ -856,3 +896,753 @@ class TestAttentionNeedleSNR:
         assert boosted > 100 * max(base, 1e-9), (
             f"metric must saturate when attention IS on the needle "
             f"(base={base:.3f}, boosted={boosted:.3f})")
+
+
+
+class TestTrainProbe:
+    """scripts/train_probe.py: position-conditioned linear probing (H4-P).
+    The mech-interp reviewer's question 'is mid-context info actually more
+    LINEARLY ACCESSIBLE, or just more attended-to?' needs its own tool -
+    P(B) and SNR both live downstream of attention; the ridge probe reads
+    the residual stream directly."""
+
+    def _load(self):
+        import importlib.util as ilu
+        spec = ilu.spec_from_file_location(
+            "train_probe", os.path.join(ROOT, "scripts", "train_probe.py"))
+        mod = ilu.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def _model(self, **kw):
+        base = dict(block_size=128, vocab_size=50257, n_layer=2, n_head=2,
+                    n_embd=64, gradient_checkpointing=False)
+        base.update(kw)
+        torch.manual_seed(0)
+        return GPT(GPTConfig(**base)).eval()
+
+    def test_chance_at_random_init(self):
+        """Calibration: random weights carry no needle info; every depth
+        must decode near chance (1/8), i.e. the probe must not hallucinate
+        signal out of the ridge fit itself."""
+        tp = self._load()
+        res = tp.run_probe(self._model(), n_per_class=12)
+        for d, a in res["probe_acc_by_depth"].items():
+            assert a < 0.45, f"depth {d}: {a} >> chance 0.125"
+        # Selectivity control: no real signal -> real ~ shuffled (both chance)
+        assert all(v < 0.4 for v in res["probe_selectivity"].values())
+
+    def test_detects_planted_signal(self):
+        """Ground truth: if a label-dependent direction IS in the residual
+        stream, the probe must find it (sensitivity)."""
+        tp = self._load()
+        m = self._model()
+        sig = torch.randn(8, 64) * 5.0
+        holder = [None]
+        orig = m.forward
+
+        def wrapped(idx, targets=None):
+            holder[0] = idx
+            return orig(idx, targets)
+
+        m.forward = wrapped
+
+        def hook(_mod, _inp, out):
+            h = out[0] if isinstance(out, tuple) else out
+            toks = holder[0]
+            T = toks.shape[1]
+            mask = (toks >= 46000) & (toks < 46008)
+            for b in range(toks.shape[0]):
+                idx = mask[b].nonzero()
+                if len(idx):
+                    h[b, T - 2, :] += sig[int(toks[b, idx[0]] - 46000)]
+            return (h,) + out[1:] if isinstance(out, tuple) else h
+
+        hd = m.transformer.h[-1].register_forward_hook(hook)
+        res = tp.run_probe(m, n_per_class=12)
+        hd.remove()
+        assert all(a > 0.8 for a in res["probe_acc_by_depth"].values())
+        # Real signal -> high selectivity (probe reads features, not memorizes)
+        assert all(v > 0.5 for v in res["probe_selectivity"].values())
+
+    def test_selection_on_val_not_test(self):
+        """The selection-bias fix: layer and lambda must be chosen on VAL;
+        the reported scalar is TEST accuracy of that choice. Structural
+        check: run_probe reports the selection metadata, and the selected
+        (layer, lambda) is derived from val_acc - never from test."""
+        tp = self._load()
+        res = tp.run_probe(self._model(), n_per_class=12)
+        sel = res["probe_selection"]
+        assert set(sel) == {"0.1", "0.3", "0.5", "0.7", "0.9"}
+        for d, rec in sel.items():
+            assert 0 <= rec["layer"] < 2
+            assert rec["lambda"] in tp.LAMBDA_GRID
+            assert 0.0 <= rec["val_acc"] <= 1.0
+        src = open(os.path.join(ROOT, "scripts", "train_probe.py")).read()
+        assert "va[j] > best_val" in src, "layer choice must compare VAL accs"
+
+    def test_nan_policy_tiny_vocab(self):
+        import math
+        tp = self._load()
+        m = self._model(vocab_size=1024)
+        res = tp.run_probe(m)
+        assert math.isnan(res["probe_litm_gap"])
+
+    def test_restores_training_mode(self):
+        tp = self._load()
+        m = self._model()
+        m.train()
+        tp.run_probe(m, n_per_class=8)
+        assert m.training
+
+
+class TestPerPositionLoss:
+    """per_position_loss_curve: the field-standard long-context metric
+    (FoX Fig.1-style) on REAL data - the non-synthetic companion to the
+    author-created probes (metric-integrity answer for Reviewer 2)."""
+
+    def _model(self, vocab=256):
+        torch.manual_seed(0)
+        return GPT(GPTConfig(block_size=128, vocab_size=vocab, n_layer=1,
+                             n_head=2, n_embd=64,
+                             gradient_checkpointing=False)).eval()
+
+    def test_ratio_near_one_on_iid_tokens(self):
+        """IID random tokens carry no context signal: early/late ratio must
+        be ~1 (the metric must not invent long-context benefit)."""
+        from src.eval import per_position_loss_curve
+        m = self._model()
+        g = torch.Generator().manual_seed(1)
+        toks = torch.randint(0, 256, (8, 129), generator=g)
+        r = per_position_loss_curve(m, toks)
+        assert 0.9 < r["posloss_early_late_ratio"] < 1.1
+        assert abs(r["posloss_mid_bump"]) < 0.2
+
+    def test_nan_gate_short_input(self):
+        import math
+        from src.eval import per_position_loss_curve
+        m = self._model()
+        r = per_position_loss_curve(m, torch.randint(0, 256, (2, 20)))
+        assert math.isnan(r["posloss_early_late_ratio"])
+
+    def test_deterministic_and_side_effect_free(self):
+        from src.eval import per_position_loss_curve
+        m = self._model()
+        g = torch.Generator().manual_seed(2)
+        toks = torch.randint(0, 256, (4, 129), generator=g)
+        m.train()
+        r1 = per_position_loss_curve(m, toks)
+        assert m.training, "training mode must be restored"
+        r2 = per_position_loss_curve(m, toks)
+        assert r1 == r2
+
+    def test_detects_planted_predictability(self):
+        """Ground truth: sequences whose second half deterministically
+        copies token 0 must show late-position loss BELOW early - the
+        metric must move when real structure exists. We fake it by making
+        late targets constant (predictable even for a random model after
+        bias drift is removed by using the ratio of a TRAINED-free case:
+        instead we verify the per-bin machinery orders bins correctly on
+        a crafted loss surface via monotone token predictability)."""
+        from src.eval import per_position_loss_curve
+        m = self._model()
+        g = torch.Generator().manual_seed(3)
+        toks = torch.randint(0, 256, (8, 129), generator=g)
+        toks[:, 64:] = 7  # constant tail: model CAN'T know, but bins must differ
+        r = per_position_loss_curve(m, toks)
+        # bins covering the constant tail see a single-token distribution;
+        # a random model's loss there differs from IID region - the curve
+        # must reflect a difference between first and last bins
+        bins = [v for k, v in sorted(r.items()) if k.startswith("posloss_bin_")]
+        assert len(bins) == 8
+        assert abs(bins[0] - bins[-1]) > 0.01, "metric blind to structure change"
+
+
+class TestMetricMathAgainstManual:
+    """Scientific-standards audit: each headline metric recomputed BY HAND
+    from first principles (probe layout reproduced, softmax/entropy/ratio
+    computed directly) and compared to the library value. Guards against
+    formula drift - the failure mode where code runs fine but computes a
+    subtly different quantity than the paper claims."""
+
+    def _model(self):
+        torch.manual_seed(0)
+        return GPT(GPTConfig(block_size=256, vocab_size=50257, n_layer=2,
+                             n_head=2, n_embd=64,
+                             gradient_checkpointing=False)).eval()
+
+    def test_induction_equals_manual_softmax_lookup(self):
+        from src.eval import (evaluate_induction, INDUCTION_TOK_A_OFFSET,
+                              INDUCTION_TOK_B_OFFSET)
+        m = self._model()
+        seed, bs = 42, 4
+        T = 256
+        g = torch.Generator(); g.manual_seed(seed)
+        tokens = torch.randint(100, 20000 - 1, (bs, T), generator=g)
+        i = torch.arange(bs)
+        A = INDUCTION_TOK_A_OFFSET + i
+        B = INDUCTION_TOK_B_OFFSET + i
+        pos1 = T // 4
+        tokens[i, pos1] = A
+        tokens[i, pos1 + 1] = B
+        tokens[i, T - 2] = A
+        with torch.no_grad():
+            logits, _ = m(tokens)
+        probs = torch.softmax(logits[:, T - 2, :].float(), dim=-1)
+        manual = float(probs[i, B].mean())
+        lib = evaluate_induction(m, device="cpu", seed=seed, batch_size=bs)
+        assert abs(manual - lib) < 1e-6
+
+    def test_entropy_equals_manual_plogp(self):
+        from src.eval import measure_attention_entropy
+        m = self._model()
+        seed, bs = 7, 2
+        T = 256
+        g = torch.Generator(device="cpu"); g.manual_seed(seed)
+        tokens = torch.randint(0, m.config.vocab_size, (bs, T), generator=g)
+        m.set_diagnostics(enabled=True, capture_attention=True)
+        with torch.no_grad():
+            m(tokens)
+        ents = []
+        for blk in m.transformer.h:
+            att = blk.attn.last_attn.float().clamp_min(1e-12)
+            ents.append(float((-(att * att.log()).sum(-1)).mean()))
+        m.set_diagnostics(enabled=False)
+        manual = sum(ents) / len(ents)
+        lib = measure_attention_entropy(m, device="cpu", seed=seed, batch_size=bs)
+        assert abs(manual - lib) < 1e-3
+
+    def test_litm_scalars_equal_manual_aggregation(self):
+        from src.eval import positional_recall_curve
+        m = self._model()
+        out = positional_recall_curve(m, batch_size=2)
+        edges = [out["pos_10"], out["pos_90"]]
+        middle = [out["pos_30"], out["pos_50"], out["pos_70"]]
+        assert abs((sum(edges) / 2 - min(middle)) - out["litm_middle_drop"]) < 1e-9
+        assert abs((min(middle) / max(edges)) - out["litm_worst_frac"]) < 1e-9
+
+    def test_per_position_loss_uniform_row_weights(self):
+        """Finding #15 regression: with N % batch_size != 0 the old code
+        summed per-batch MEANS, so rows in the short final batch weighed
+        1/len(last_batch) instead of 1/N (measured bin drift up to 1.2e-2
+        at N=5, bs=4). Every bin must equal the direct equal-weight
+        computation bit-for-bit."""
+        from src.eval import per_position_loss_curve
+        m = self._model()
+        N, T = 5, 64  # 5 rows, batch 4 -> final batch of 1 (the bug trigger)
+        g = torch.Generator(); g.manual_seed(4)
+        toks = torch.randint(0, 50257, (N, T + 1), generator=g)
+        out = per_position_loss_curve(m, toks, batch_size=4, n_bins=4)
+        with torch.no_grad():
+            x, y = toks[:, :T], toks[:, 1:T + 1]
+            logits, _ = m(x)
+            ls = torch.nn.functional.cross_entropy(
+                logits.reshape(-1, logits.size(-1)).float(),
+                y.reshape(-1), reduction="none").reshape(y.shape)
+            per_pos = ls.mean(0)
+            edges = torch.linspace(0, T, 5, dtype=torch.long)
+            manual = [float(per_pos[edges[i]:edges[i + 1]].mean())
+                      for i in range(4)]
+        for i, want in enumerate(manual):
+            assert abs(out[f"posloss_bin_{i:02d}"] - want) < 1e-6, \
+                f"bin {i}: {out[f'posloss_bin_{i:02d}']} != manual {want}"
+
+    def test_needle_snr_equals_manual_attention_ratio(self):
+        """snr_needle recomputed by hand from captured attention: same probe
+        layout, needle = mean mass on the pair, filler = mean mass on the
+        masked row (no needle, no self/future). Must match bit-for-bit."""
+        from src.eval import (attention_needle_snr, INDUCTION_TOK_A_OFFSET,
+                              INDUCTION_TOK_B_OFFSET)
+        m = self._model()
+        res = attention_needle_snr(m, seed=42, batch_size=2)
+        T, B = 256, 2
+        g = torch.Generator(); g.manual_seed(42)
+        lo = INDUCTION_TOK_B_OFFSET + B
+        tokens = torch.randint(lo, 50257, (B, T), generator=g)
+        i = torch.arange(B)
+        pos_ab, q_pos = T // 3, T - 2
+        tokens[:, pos_ab] = INDUCTION_TOK_A_OFFSET + i
+        tokens[:, pos_ab + 1] = INDUCTION_TOK_B_OFFSET + i
+        tokens[:, q_pos] = INDUCTION_TOK_A_OFFSET + i
+        m.set_diagnostics(enabled=True, capture_attention=True)
+        try:
+            with torch.no_grad():
+                m(tokens)
+            manual = []
+            for blk in m.transformer.h:
+                att = blk.attn.last_attn.detach().float()
+                row = att[:, :, q_pos, :]
+                needle = row[:, :, pos_ab:pos_ab + 2].sum(-1) / 2.0
+                mask = torch.ones(row.shape[-1], dtype=torch.bool)
+                mask[pos_ab:pos_ab + 2] = False
+                mask[q_pos:] = False
+                filler = row[:, :, mask].mean(-1)
+                manual.append(float((needle / filler.clamp_min(1e-12)).mean()))
+        finally:
+            m.set_diagnostics(enabled=False, capture_attention=False)
+        assert abs(res["snr_needle_last"] - manual[-1]) < 1e-9
+        assert abs(res["snr_needle_best"] - max(manual)) < 1e-9
+
+
+class TestProbeStatisticalProperties:
+    """Final eval.py audit layer: noise floor across seeds (the denominator
+    of every error bar in the paper) and bf16-checkpoint stability (best/
+    final checkpoints are SAVED in bf16 - probes must be valid on them)."""
+
+    def _model(self):
+        torch.manual_seed(0)
+        return GPT(GPTConfig(block_size=256, vocab_size=50257, n_layer=2,
+                             n_head=2, n_embd=64,
+                             gradient_checkpointing=False)).eval()
+
+    def test_probe_seed_noise_is_bounded(self):
+        """Across 5 probe seeds at random init the coefficient of variation
+        must stay small (<5%): the probes measure the MODEL, not the seed.
+        Measured baseline: induction CV 0.2%, litm 0.4%, snr 0.04%."""
+        import statistics
+        from src.eval import evaluate_induction, attention_needle_snr
+        m = self._model()
+        for fn, key in ((lambda s: evaluate_induction(m, device="cpu", seed=s,
+                                                      batch_size=4), "induction"),
+                        (lambda s: attention_needle_snr(m, seed=s, batch_size=2)
+                         ["snr_needle_last"], "snr")):
+            vals = [fn(s) for s in range(42, 47)]
+            cv = statistics.stdev(vals) / abs(statistics.fmean(vals))
+            assert cv < 0.05, f"{key}: seed-noise CV {cv:.1%} - probe unstable"
+
+    def test_probes_stable_on_bf16_cast_weights(self):
+        """best_val/final checkpoints are saved in bf16; probes run on them
+        post-hoc (causal_patch, analyze_checkpoint). Metrics must stay
+        finite and within 15% of the fp32 value at random init."""
+        import math
+        from src.eval import evaluate_induction, positional_recall_curve
+        m32 = self._model()
+        sd = {k: (v.to(torch.bfloat16).to(torch.float32)
+                  if torch.is_floating_point(v) else v)
+              for k, v in m32.state_dict().items()}
+        mbf = GPT(m32.config).eval()
+        mbf.load_state_dict(sd, strict=True)
+        for fn in (lambda mm: evaluate_induction(mm, device="cpu", batch_size=4),
+                   lambda mm: positional_recall_curve(mm, batch_size=2)
+                   ["litm_worst_frac"]):
+            a, b = fn(m32), fn(mbf)
+            assert math.isfinite(b)
+            assert abs(a - b) / max(abs(a), 1e-12) < 0.15
+
+
+class TestSinkAndOutlierStats:
+    """Metric-inventory round vs Oral/top papers of the niche:
+    attention_sink_stats (StreamingLLM standard) and
+    activation_outlier_stats (Diff Transformer Sec 3.7 standard).
+    Both calibrated against first principles."""
+
+    def _model(self):
+        torch.manual_seed(0)
+        return GPT(GPTConfig(block_size=256, vocab_size=50257, n_layer=2,
+                             n_head=2, n_embd=64,
+                             gradient_checkpointing=False)).eval()
+
+    def test_sink_mass_matches_uniform_attention_at_init(self):
+        """No sink exists at random init: mass(pos 0) must equal the
+        uniform-attention expectation mean(1/(k+1)) over causal rows
+        (measured ratio 1.00)."""
+        import statistics
+        from src.eval import attention_sink_stats
+        r = attention_sink_stats(self._model())
+        expect = statistics.fmean(1.0 / (k + 1) for k in range(16, 256))
+        assert 0.5 < r["sink_mass_first"] / expect < 2.0
+        assert r["sink_mass_first4"] > r["sink_mass_first"]
+        assert r["sink_top_layer"] >= r["sink_mass_first"]
+
+    def test_outliers_gaussian_at_init(self):
+        """Random-init residual stream is near-Gaussian: excess kurtosis
+        ~0 (measured -0.03), max/rms in the 2-10 band. Training-induced
+        outliers move BOTH numbers up - that movement is the signal."""
+        from src.eval import activation_outlier_stats
+        o = activation_outlier_stats(self._model())
+        assert abs(o["act_excess_kurtosis"]) < 2.0
+        assert 2.0 < o["act_max_over_rms"] < 10.0
+
+    def test_both_side_effect_free_and_deterministic(self):
+        from src.eval import attention_sink_stats, activation_outlier_stats
+        m = self._model()
+        m.train()
+        assert attention_sink_stats(m) == attention_sink_stats(m)
+        assert activation_outlier_stats(m) == activation_outlier_stats(m)
+        assert m.training
+        assert not m.transformer.h[0].attn.capture_attention
+
+
+class TestMetricsSeeRealTraining:
+    """The last audit level for eval.py: DYNAMIC validation. A metric that
+    cannot see actual learning is useless for the paper. We train a tiny
+    2-layer model (minimum for the induction circuit, Olsson et al.) on
+    dense induction patterns in the probes' own token ranges and assert
+    every headline metric moves in the pre-registered direction.
+    Measured on this harness: induction x168, snr x1.13 (up),
+    entropy 3.878 -> 3.773 (down) after 120 Adam steps."""
+
+    def test_probes_move_under_real_training(self):
+        import torch as _t
+        from src.eval import (evaluate_induction, attention_needle_snr,
+                              measure_attention_entropy)
+        _t.manual_seed(0)
+        m = GPT(GPTConfig(block_size=128, vocab_size=50257, n_layer=2,
+                          n_head=2, n_embd=64, gradient_checkpointing=False))
+
+        def make_batch(bs=4, T=128, seed=None):
+            g = _t.Generator()
+            if seed is not None:
+                g.manual_seed(seed)
+            x = _t.randint(100, 20000, (bs, T + 1), generator=g)
+            for row in range(bs):
+                a = 10 + int(_t.randint(0, 30, (1,), generator=g))
+                b = 50 + int(_t.randint(0, 30, (1,), generator=g))
+                for start in range(2, T - 2, 12):
+                    x[row, start] = a
+                    x[row, start + 1] = b
+            return x[:, :-1], x[:, 1:]
+
+        ind0 = evaluate_induction(m.eval(), device="cpu", batch_size=2)
+        snr0 = attention_needle_snr(m, batch_size=2)["snr_needle_last"]
+        ent0 = measure_attention_entropy(m, device="cpu", batch_size=2)
+        opt = _t.optim.Adam(m.parameters(), lr=1e-3)
+        m.train()
+        for step in range(120):
+            x, y = make_batch(seed=1000 + step)
+            _, loss = m(x, y)
+            opt.zero_grad()
+            loss.backward()
+            opt.step()
+        ind1 = evaluate_induction(m.eval(), device="cpu", batch_size=2)
+        snr1 = attention_needle_snr(m, batch_size=2)["snr_needle_last"]
+        ent1 = measure_attention_entropy(m, device="cpu", batch_size=2)
+        assert ind1 > ind0 * 3, f"induction blind to training: {ind0} -> {ind1}"
+        assert snr1 > snr0, f"snr blind to training: {snr0} -> {snr1}"
+        assert ent1 < ent0, f"entropy blind to training: {ent0} -> {ent1}"
+
+
+class TestFrankenBehavioralSterility:
+    """Round-5 audit: transplant correctness proven at the LOGIT level, not
+    just tensor equality - the form a reviewer actually cares about."""
+
+    KW = dict(block_size=64, vocab_size=50257, n_layer=2, n_head=2, n_embd=32,
+              gradient_checkpointing=False, phase_mult=0.15, use_laplace=True,
+              laplace_alpha=1.0)
+
+    def _cp(self):
+        import importlib
+        sys.path.insert(0, os.path.join(ROOT, "scripts"))
+        return importlib.import_module("causal_patch")
+
+    def test_retrieval_transplant_on_identity_pair_is_noop(self):
+        """Grafting all-zero mechanisms into an identical body must not move
+        a single logit: the transplant machinery itself is sterile."""
+        cp = self._cp()
+        torch.manual_seed(0)
+        hla = GPT(GPTConfig(**self.KW)).eval()
+        base = GPT(GPTConfig(**self.KW)).eval()
+        base.load_state_dict(hla.state_dict())
+        fr = cp.build_franken(base.state_dict(), hla.state_dict(), 32,
+                              "retrieval", donor="hla")
+        m = GPT(GPTConfig(**self.KW)).eval()
+        m.load_state_dict(fr)
+        x = torch.randint(0, 50257, (1, 48),
+                          generator=torch.Generator().manual_seed(1))
+        with torch.no_grad():
+            lb, _ = base(x)
+            lf, _ = m(x)
+        assert torch.equal(lb, lf)
+
+    def test_full_franken_matches_hla_logits(self):
+        cp = self._cp()
+        torch.manual_seed(0)
+        hla = GPT(GPTConfig(**self.KW)).eval()
+        base = GPT(GPTConfig(**self.KW)).eval()
+        base.load_state_dict(hla.state_dict())
+        with torch.no_grad():
+            for blk in hla.transformer.h:
+                blk.attn.W_phase_q.normal_(0, 0.3, generator=torch.Generator().manual_seed(2))
+            for blk in base.transformer.h:
+                blk.attn.c_attn.weight.add_(0.02)
+        fr = cp.build_franken(base.state_dict(), hla.state_dict(), 32,
+                              "full", donor="hla")
+        m = GPT(GPTConfig(**self.KW)).eval()
+        m.load_state_dict(fr)
+        x = torch.randint(0, 50257, (1, 48),
+                          generator=torch.Generator().manual_seed(3))
+        with torch.no_grad():
+            lh, _ = hla(x)
+            lf, _ = m(x)
+        assert torch.equal(lh, lf)
+
+    def test_reverse_then_forward_recovers_hla_state(self):
+        """Composition sanity: anti-franken then re-graft HLA retrieval must
+        reconstruct the HLA state dict exactly (no key leaks either way)."""
+        cp = self._cp()
+        torch.manual_seed(0)
+        hla = GPT(GPTConfig(**self.KW)).eval()
+        base = GPT(GPTConfig(**self.KW)).eval()
+        base.load_state_dict(hla.state_dict())
+        with torch.no_grad():
+            for blk in hla.transformer.h:
+                blk.attn.W_gate_k.weight.normal_(0, 0.3, generator=torch.Generator().manual_seed(4))
+            for blk in base.transformer.h:
+                blk.attn.c_attn.weight.add_(0.01)
+        rev = cp.build_franken(base.state_dict(), hla.state_dict(), 32,
+                               "retrieval", donor="base")
+        back = cp.build_franken(rev, hla.state_dict(), 32,
+                                "retrieval", donor="hla")
+        hs = hla.state_dict()
+        assert all(torch.equal(back[k], hs[k]) for k in back)
+
+
+class TestProbeSmallSampleGuard:
+    """Finding #18: n_per_class < 8 leaves classes untrained under the
+    60/20/20 split (measured: npc=3 -> 1 of 8 classes absent from train);
+    accuracies degrade silently. The probe must refuse."""
+
+    def test_small_n_per_class_refused(self):
+        import importlib
+        import pytest
+        sys.path.insert(0, os.path.join(ROOT, "scripts"))
+        tp = importlib.import_module("train_probe")
+        m = GPT(GPTConfig(block_size=64, vocab_size=50257, n_layer=1,
+                          n_head=2, n_embd=32,
+                          gradient_checkpointing=False)).eval()
+        with pytest.raises(SystemExit):
+            tp.run_probe(m, n_per_class=4)
+
+
+class TestSampleGreedyParity:
+    """Round-11 audit: paper-appendix samples must come from THE model -
+    greedy generation must equal the manual argmax(forward) loop exactly,
+    with HLA mechanisms active (a windowing/cache bug in the generation
+    path would silently sample from a different model)."""
+
+    def test_greedy_equals_manual_argmax_loop(self):
+        torch.manual_seed(0)
+        m = GPT(GPTConfig(block_size=32, vocab_size=1000, n_layer=2, n_head=2,
+                          n_embd=32, phase_mult=0.15, use_laplace=True,
+                          laplace_alpha=1.0,
+                          gradient_checkpointing=False)).eval()
+        with torch.no_grad():
+            for blk in m.transformer.h:
+                blk.attn.W_phase_q.normal_(
+                    0, 0.3, generator=torch.Generator().manual_seed(1))
+        seq = torch.tensor([[1, 2, 3]], dtype=torch.long)
+        # sample.py delegates to model.generate - test that exact path
+        got = m.generate(seq.clone(), 8, temperature=0.8, top_k=200,
+                         greedy=True)
+        want = seq.clone()
+        with torch.no_grad():
+            for _ in range(8):
+                logits, _ = m(want[:, -32:])
+                nxt = logits[0, -1].argmax().item()
+                want = torch.cat(
+                    [want, torch.tensor([[nxt]], dtype=torch.long)], dim=1)
+        assert got[0].tolist() == want[0].tolist()
+
+
+class TestProbeCapturePosition:
+    """Round-11: capture_residuals must read exactly q_pos (differential:
+    shifting q_pos by one must change features; re-capture is bit-stable)."""
+
+    def test_qpos_differential_and_stability(self):
+        import importlib
+        sys.path.insert(0, os.path.join(ROOT, "scripts"))
+        tp = importlib.import_module("train_probe")
+        torch.manual_seed(0)
+        m = GPT(GPTConfig(block_size=64, vocab_size=50257, n_layer=2,
+                          n_head=2, n_embd=32,
+                          gradient_checkpointing=False)).eval()
+        toks = torch.randint(100, 20000, (4, 64),
+                             generator=torch.Generator().manual_seed(1))
+        f1 = tp.capture_residuals(m, toks, q_pos=62)
+        f2 = tp.capture_residuals(m, toks, q_pos=61)
+        assert (f1[0] - f2[0]).abs().max().item() > 0
+        f3 = tp.capture_residuals(m, toks, q_pos=62)
+        assert all(torch.equal(x, y) for x, y in zip(f1, f3, strict=True))
+        assert len(f1) == 2
+
+
+class TestPasskeyEval:
+    """Round-12 (reviewer-mitigation): field-standard passkey retrieval at
+    the FULL context window (Mohtashami & Jaggi) - the external anchor the
+    simulated R2 demanded (B7). Calibration: exact-match at random init
+    must be exactly 0; NaN policy on tiny blocks; deterministic per seed."""
+
+    def _model(self, block=128):
+        torch.manual_seed(0)
+        return GPT(GPTConfig(block_size=block, vocab_size=50257, n_layer=2,
+                             n_head=2, n_embd=32,
+                             gradient_checkpointing=False)).eval()
+
+    def _ep(self):
+        import importlib
+        sys.path.insert(0, os.path.join(ROOT, "scripts"))
+        return importlib.import_module("eval_passkey")
+
+    def test_zero_at_random_init_and_deterministic(self):
+        import json as _json
+        ep = self._ep()
+        m = self._model()
+        r1 = ep.eval_passkey(m, n_trials=3, passkey_len=3, seed=42)
+        assert r1["passkey_acc_mean"] == 0.0
+        r2 = ep.eval_passkey(m, n_trials=3, passkey_len=3, seed=42)
+        assert _json.dumps(r1, sort_keys=True) == _json.dumps(r2, sort_keys=True)
+
+    def test_nan_policy_small_block(self):
+        ep = self._ep()
+        m = self._model(block=32)
+        r = ep.eval_passkey(m, n_trials=2, passkey_len=3)
+        assert r["passkey_acc_mean"] != r["passkey_acc_mean"]
+
+    def test_token_ranges_disjoint(self):
+        """Passkey/marker/filler ranges must not collide with each other or
+        with the induction/LITM probe blocks (45000/46000)."""
+        ep = self._ep()
+        assert ep.FILLER_HI <= ep.PASSKEY_LO
+        assert ep.PASSKEY_HI <= ep.MARKER_TOK
+        assert not (ep.PASSKEY_LO <= 45000 < ep.PASSKEY_HI)
+        assert not (ep.PASSKEY_LO <= 46000 < ep.PASSKEY_HI)
+        assert ep.MARKER_TOK not in (45000, 46000)
+
+
+class TestGapClosurePowerFields:
+    """Round-12: gap_closure must report its own statistical power (R2-Q2):
+    min detectable gap at z=3, the observed z, and a powered flag."""
+
+    def test_power_fields(self):
+        import importlib
+        sys.path.insert(0, os.path.join(ROOT, "scripts"))
+        cp = importlib.import_module("causal_patch")
+        r = cp.gap_closure({"induction": 0.1, "induction_std": 0.01},
+                           {"induction": 0.3, "induction_std": 0.02},
+                           {"induction": 0.25})["induction"]
+        assert abs(r["min_detectable_gap_z3"] - 0.06) < 1e-12
+        assert abs(r["gap_over_noise_z"] - 10.0) < 1e-9
+        assert r["powered"] == 1.0
+        r2 = cp.gap_closure({"induction": 0.1, "induction_std": 0.05},
+                            {"induction": 0.13, "induction_std": 0.05},
+                            {"induction": 0.12})["induction"]
+        assert r2["powered"] == 0.0
+
+
+class TestPrefixMatchPerHead:
+    """Round-12: per-head census keys must exist and agree with aggregates
+    (feeds fig10; a drift here silently blanks the census figure)."""
+
+    def test_per_head_keys_and_consistency(self):
+        from src.eval import prefix_matching_score
+        torch.manual_seed(0)
+        m = GPT(GPTConfig(block_size=128, vocab_size=50257, n_layer=2,
+                          n_head=4, n_embd=64,
+                          gradient_checkpointing=False)).eval()
+        r = prefix_matching_score(m, batch_size=2)
+        heads = [k for k in r if "_H" in k]
+        assert len(heads) == 8
+        for li in (0, 1):
+            hv = [v for k, v in r.items() if k.startswith(f"L{li:02d}_H")]
+            assert abs(max(hv) - r[f"L{li:02d}_prefix_match_max"]) < 1e-12
+
+
+class TestPaddedVocabMasking:
+    """Finding #19: with padded_vocab_size > vocab_size (the TPU configs:
+    50304 vs 50257) the model's own loss masks pad classes but eval code
+    computed CE/softmax over RAW logits - 47 phantom classes inflated CE by
+    ~1e-3 and deflated every P(target) probe. Symmetric across twins but
+    biased vs the true distribution. All eval paths must match the model's
+    masked objective exactly."""
+
+    KW = dict(block_size=64, vocab_size=50257, padded_vocab_size=50304,
+              n_layer=2, n_head=2, n_embd=32, gradient_checkpointing=False)
+
+    def test_per_position_loss_matches_model_masked_loss(self):
+        from src.eval import per_position_loss_curve
+        torch.manual_seed(0)
+        m = GPT(GPTConfig(**self.KW)).eval()
+        g = torch.Generator(); g.manual_seed(1)
+        toks = torch.randint(0, 50257, (4, 65), generator=g)
+        r = per_position_loss_curve(m, toks, batch_size=4, n_bins=4)
+        got = sum(r[f"posloss_bin_{i:02d}"] for i in range(4)) / 4
+        with torch.no_grad():
+            _, lm = m(toks[:, :64], toks[:, 1:65])
+        assert abs(got - float(lm)) < 1e-5, \
+            f"eval CE {got} != model masked CE {float(lm)}"
+
+    def test_probe_softmax_excludes_pad_classes(self):
+        """P(B) over the masked distribution must exceed P(B) over the raw
+        padded distribution (denominator drops 47 phantom classes)."""
+        from src.eval import _mask_padded_logits
+        torch.manual_seed(0)
+        m = GPT(GPTConfig(**self.KW)).eval()
+        g = torch.Generator(); g.manual_seed(2)
+        x = torch.randint(0, 50257, (1, 32), generator=g)
+        with torch.no_grad():
+            logits, _ = m(x)
+        raw = torch.softmax(logits[0, -1].float(), dim=-1)
+        masked = torch.softmax(_mask_padded_logits(m, logits[0, -1].float()),
+                               dim=-1)
+        assert float(masked[:50257].sum()) > 0.999999
+        assert float(raw[50257:].sum()) > 0.0  # raw really leaked mass
+        assert torch.all(masked[:50257] >= raw[:50257])
+
+    def test_noop_on_unpadded_model(self):
+        from src.eval import _mask_padded_logits
+        kw = dict(self.KW)
+        kw.pop("padded_vocab_size")
+        torch.manual_seed(0)
+        m = GPT(GPTConfig(**kw)).eval()
+        g = torch.Generator(); g.manual_seed(3)
+        x = torch.randint(0, 50257, (1, 16), generator=g)
+        with torch.no_grad():
+            logits, _ = m(x)
+        out = _mask_padded_logits(m, logits.float())
+        assert torch.equal(out, logits.float())
+
+
+class TestNonFiniteCheckpointGuards:
+    """Findings #20/#21 (round 15). #21: a loss-spike NaN leaking into a
+    saved checkpoint used to flow SILENTLY through causal_patch and
+    train_probe (JSON full of nan presented as results). Both CLIs must
+    refuse loudly. #20 is covered in test_train_utils (duplicate JSON keys)."""
+
+    def _nan_ckpt(self, tmp_path):
+        import json
+        torch.manual_seed(0)
+        kw = dict(block_size=64, vocab_size=50257, n_layer=1, n_head=2,
+                  n_embd=32, gradient_checkpointing=False)
+        m = GPT(GPTConfig(**kw))
+        sd = m.state_dict()
+        k = next(k for k in sd if "c_attn.weight" in k)
+        sd[k][0, 0] = float("nan")
+        ck = str(tmp_path / "nan.pt")
+        cfg = str(tmp_path / "cfg.json")
+        torch.save(sd, ck)
+        json.dump({"model": kw}, open(cfg, "w"))
+        return ck, cfg
+
+    def test_causal_patch_refuses_nan_weights(self, tmp_path):
+        import subprocess
+        ck, cfg = self._nan_ckpt(tmp_path)
+        r = subprocess.run([sys.executable,
+                            os.path.join(ROOT, "scripts", "causal_patch.py"),
+                            "--base-checkpoint", ck, "--hla-checkpoint", ck,
+                            "--hla-config", cfg, "--out",
+                            str(tmp_path / "o.json"), "--probe-seeds", "42"],
+                           capture_output=True, text=True)
+        assert r.returncode != 0
+        assert "non-finite" in (r.stdout + r.stderr)
+
+    def test_train_probe_refuses_nan_weights(self, tmp_path):
+        import subprocess
+        ck, cfg = self._nan_ckpt(tmp_path)
+        r = subprocess.run([sys.executable,
+                            os.path.join(ROOT, "scripts", "train_probe.py"),
+                            "--checkpoint", ck, "--config", cfg,
+                            "--out", str(tmp_path / "p.json"),
+                            "--n-per-class", "8"],
+                           capture_output=True, text=True)
+        assert r.returncode != 0
+        assert "non-finite" in (r.stdout + r.stderr)

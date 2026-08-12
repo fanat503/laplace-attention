@@ -204,7 +204,8 @@ class TestDocsConsistency:
     documentation numbers are cross-checked against reality by CI."""
 
     def test_readme_test_count_matches_collected(self):
-        import re, subprocess
+        import re
+        import subprocess
         readme = open(os.path.join(ROOT, "README.md"), encoding="utf-8").read()
         # Only TOTAL-count claims (badge, layout total, quick-start echo,
         # section header) - NOT per-file mentions like "test_theory.py (9 tests)".
@@ -436,7 +437,8 @@ class TestExternalReviewRound2:
         Corollary 7.1, and the numeric claim in it must be true."""
         theory = open(os.path.join(ROOT, "docs", "THEORY.md"), encoding="utf-8").read()
         assert "Corollary 7.1" in theory
-        import math, torch
+        import math
+        import torch
         from src.model import GPT, GPTConfig
         torch.manual_seed(0)
         cfg = GPTConfig(block_size=32, vocab_size=64, n_layer=1, n_head=2, n_embd=32,
@@ -677,7 +679,9 @@ class TestRound6Science:
         """The E1/E3 audit formula and the actual model envelope must agree
         numerically at saturation (audit is only useful if it audits the real
         model)."""
-        import json as _json, math as _m, torch
+        import json as _json
+        import math as _m
+        import torch
         from src.model import GPT, GPTConfig
         m_cfg = _json.load(open(os.path.join(ROOT, "configs", "200m_hla_v2_s42.json")))["model"]
         small = dict(m_cfg)
@@ -699,7 +703,8 @@ class TestRound6Science:
 
     def test_dataloader_deterministic_across_workers(self):
         """Sterility: batch order must not depend on num_workers."""
-        import subprocess, torch
+        import subprocess
+        import torch
         subprocess.run([sys.executable, os.path.join(ROOT, "scripts", "make_dummy_data.py")],
                        capture_output=True, cwd=ROOT)
         from src.data import FixedDataset, fixed_token_collate, worker_init_fn
@@ -758,7 +763,8 @@ class TestRound8Tooling:
     def test_bench_script_reports_ratio(self, tmp_path):
         """bench.py must report the wall-clock HLA/base ratio - the honest
         companion number to the analytic FLOPs overhead."""
-        import subprocess, json as _json
+        import subprocess
+        import json as _json
         out = tmp_path / "bench.json"
         r = subprocess.run(
             [sys.executable, os.path.join(ROOT, "scripts", "bench.py"),
@@ -859,7 +865,8 @@ class TestPaperFigures:
         by 23 files once). AST-level check: no obviously-unused top-level
         'import X' in src/ and scripts/ (cheap approximation, no pyflakes
         dependency on CI)."""
-        import ast, glob as _glob
+        import ast
+        import glob as _glob
         offenders = []
         for path in _glob.glob(os.path.join(ROOT, "src", "*.py")) + \
                 _glob.glob(os.path.join(ROOT, "scripts", "*.py")):
@@ -888,3 +895,310 @@ class TestPaperFigures:
                    "fig3_gap_closure", "fig4_knockout_context",
                    "fig5_mechanism_trajectories"):
             assert fn in fns, f"missing {fn}"
+
+
+class TestLogToolsCrashResumeContract:
+    """Finding #14: the 200m runs WILL produce crash-truncated rows and
+    autoresume duplicate-step seams. Every CSV consumer must handle both:
+    misaligned columns are a silently-wrong figure; an IndexError in a CI
+    gate is a missing verdict. Each fix here was demonstrated as a live
+    failure before patching (read_log shifted val_loss by one row on a
+    truncated line; validate_log/check_litm_csv crashed on the seam)."""
+
+    HEADER = ["step", "tokens_seen", "lr", "train_loss", "val_loss", "val_ppl"]
+
+    def _write(self, path, rows, header=None):
+        import csv as _csv
+        with open(path, "w", newline="", encoding="utf-8") as f:
+            w = _csv.writer(f)
+            w.writerow(header or self.HEADER)
+            for r in rows:
+                w.writerow(r)
+
+    def test_paper_figures_read_log_no_column_shift_on_short_row(self, tmp_path):
+        sys.path.insert(0, os.path.join(ROOT, "scripts"))
+        import importlib
+        mpf = importlib.import_module("make_paper_figures")
+        p = str(tmp_path / "log.csv")
+        self._write(p, [[1, 100, 5.0], [2, 200], [3, 300, 3.0]],
+                    header=["step", "tokens_seen", "val_loss"])
+        log = mpf.read_log(p)
+        assert len(log["val_loss"]) == len(log["tokens_seen"]) == 3
+        pairs = [(t, v) for t, v in zip(log["tokens_seen"], log["val_loss"], strict=True)
+                 if v == v]
+        # 3.0 belongs to tokens=300; the old zip attributed it to 200
+        assert pairs == [(100.0, 5.0), (300.0, 3.0)]
+
+    def test_paper_figures_read_log_resume_seam_keep_last(self, tmp_path):
+        sys.path.insert(0, os.path.join(ROOT, "scripts"))
+        import importlib
+        mpf = importlib.import_module("make_paper_figures")
+        p = str(tmp_path / "log.csv")
+        import csv as _csv
+        with open(p, "w", newline="", encoding="utf-8") as f:
+            w = _csv.writer(f)
+            w.writerow(["step", "tokens_seen", "val_loss"])
+            for s in (1, 2, 3, 4):
+                w.writerow([s, s * 100, 10 - s])
+            w.writerow(["# resumed", "x"])
+            for s in (3, 4, 5):
+                w.writerow([s, s * 100, 20 - s])
+        log = mpf.read_log(p)
+        assert log["step"] == [1.0, 2.0, 3.0, 4.0, 5.0]
+        assert log["val_loss"][2] == 17.0  # post-resume row won
+
+    def test_make_plots_read_log_resume_seam_keep_last(self, tmp_path):
+        sys.path.insert(0, os.path.join(ROOT, "scripts"))
+        import importlib
+        mp = importlib.import_module("make_plots")
+        p = str(tmp_path / "log.csv")
+        import csv as _csv
+        with open(p, "w", newline="", encoding="utf-8") as f:
+            w = _csv.writer(f)
+            w.writerow(["step", "tokens_seen", "val_loss"])
+            for s in (1, 2, 3):
+                w.writerow([s, s * 100, 10 - s])
+            w.writerow(["# resumed", "x"])
+            for s in (2, 3, 4):
+                w.writerow([s, s * 100, 20 - s])
+        log = mp.read_log(p)
+        assert log["step"] == [1.0, 2.0, 3.0, 4.0]
+        assert log["val_loss"][1] == 18.0
+
+    def test_validate_log_tolerates_crash_row_and_seam(self, tmp_path):
+        p = str(tmp_path / "log.csv")
+        import csv as _csv
+        with open(p, "w", newline="", encoding="utf-8") as f:
+            w = _csv.writer(f)
+            w.writerow(self.HEADER)
+            w.writerow([1, 100, 3e-4, 5.0, 5.1, 160.0])
+            w.writerow([2, 200, 3e-4, 4.9, "nan", "nan"])
+            w.writerow([3, 300])  # truncated crash row
+            w.writerow(["# resumed", "t"])
+            w.writerow([2, 200, 3e-4, 4.9, "nan", "nan"])  # seam re-log
+            w.writerow([3, 300, 3e-4, 4.0, 4.1, 60.0])
+        r = subprocess.run([sys.executable, os.path.join(ROOT, "scripts", "validate_log.py"), p],
+                           capture_output=True, text=True)
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert "resume_dups=1" in r.stdout and "truncated_rows=1" in r.stdout
+
+    def test_validate_log_still_rejects_backwards_tokens(self, tmp_path):
+        p = str(tmp_path / "log.csv")
+        self._write(p, [[1, 100, 3e-4, 5.0, 5.1, 160.0],
+                        [2, 50, 3e-4, 4.9, "nan", "nan"]])
+        r = subprocess.run([sys.executable, os.path.join(ROOT, "scripts", "validate_log.py"), p],
+                           capture_output=True, text=True)
+        assert r.returncode != 0
+        assert "non-monotonic" in r.stdout + r.stderr
+
+    def test_check_litm_csv_tolerates_truncated_row(self, tmp_path):
+        cols = ["step", "tokens_seen", "val_loss", "pos_10", "pos_30", "pos_50",
+                "pos_70", "pos_90", "litm_middle_drop", "litm_worst_frac"]
+        p = str(tmp_path / "log.csv")
+        self._write(p, [[1, 100, 5.0, .1, .1, .1, .1, .1, 0.0, 1.0], [2, 200]],
+                    header=cols)
+        r = subprocess.run([sys.executable, os.path.join(ROOT, "scripts", "check_litm_csv.py"),
+                            "--csv", p], capture_output=True, text=True)
+        assert r.returncode == 0, r.stdout + r.stderr
+
+    def test_check_litm_csv_still_fails_all_nan(self, tmp_path):
+        cols = ["step", "tokens_seen", "val_loss", "pos_10", "pos_30", "pos_50",
+                "pos_70", "pos_90", "litm_middle_drop", "litm_worst_frac"]
+        p = str(tmp_path / "log.csv")
+        self._write(p, [[1, 100, 5.0] + ["nan"] * 7], header=cols)
+        r = subprocess.run([sys.executable, os.path.join(ROOT, "scripts", "check_litm_csv.py"),
+                            "--csv", p], capture_output=True, text=True)
+        assert r.returncode != 0
+
+    def test_paper_figures_has_seven_figures(self):
+        """fig6 (per-position loss, FoX Fig.1 convention: WHERE the gain
+        lives) and fig7 (sink mass + outliers: softmax-pathology side
+        effects) joined the pipeline - all seven must exist."""
+        import ast
+        path = os.path.join(ROOT, "scripts", "make_paper_figures.py")
+        tree = ast.parse(open(path).read())
+        fns = {n.name for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
+        for fn in ("fig6_per_position_loss", "fig7_sink_outliers"):
+            assert fn in fns, f"missing {fn}"
+
+    def test_fig6_fig7_run_on_minimal_analysis_json(self, tmp_path):
+        """Executable check on synthetic analyze_checkpoint JSONs - the
+        figure code must produce files, not just parse."""
+        pytest.importorskip("matplotlib")
+        sys.path.insert(0, os.path.join(ROOT, "scripts"))
+        import importlib
+        mpf = importlib.import_module("make_paper_figures")
+        base = {"per_position_loss": {f"posloss_bin_{i:02d}": 10.0 - 0.01 * i for i in range(8)},
+                "attention_sink": {"sink_mass_first": 0.02, "sink_mass_first4": 0.08,
+                                   "sink_top_layer": 0.02},
+                "activation_outliers": {"act_excess_kurtosis": 0.5, "act_max_over_rms": 6.0}}
+        hla = {"per_position_loss": {f"posloss_bin_{i:02d}": 10.0 - 0.02 * i for i in range(8)},
+               "attention_sink": {"sink_mass_first": 0.01, "sink_mass_first4": 0.05,
+                                  "sink_top_layer": 0.01},
+               "activation_outliers": {"act_excess_kurtosis": 0.2, "act_max_over_rms": 4.0}}
+        pb, ph = str(tmp_path / "b.json"), str(tmp_path / "h.json")
+        json.dump(base, open(pb, "w"))
+        json.dump(hla, open(ph, "w"))
+        o6 = str(tmp_path / "fig6.png")
+        o7 = str(tmp_path / "fig7.png")
+        mpf.fig6_per_position_loss(pb, ph, o6)
+        mpf.fig7_sink_outliers(pb, ph, o7)
+        assert os.path.getsize(o6) > 1000 and os.path.getsize(o7) > 1000
+
+    def test_paper_figures_has_fig8_probe_depth(self):
+        """fig8: linear-probe accuracy vs depth with chance line + shuffled
+        control (Hewitt-Liang selectivity) - the representation-level
+        counterpart of fig2's behavioral LITM curve."""
+        import ast
+        path = os.path.join(ROOT, "scripts", "make_paper_figures.py")
+        tree = ast.parse(open(path).read())
+        fns = {n.name for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
+        assert "fig8_probe_depth" in fns
+
+    def test_fig8_runs_on_minimal_probe_json(self, tmp_path):
+        pytest.importorskip("matplotlib")
+        sys.path.insert(0, os.path.join(ROOT, "scripts"))
+        import importlib
+        mpf = importlib.import_module("make_paper_figures")
+        rec = {"probe_acc_by_depth": {"0.1": 0.4, "0.3": 0.35, "0.5": 0.3,
+                                      "0.7": 0.36, "0.9": 0.41},
+               "probe_shuffled_by_depth": {"0.1": 0.13, "0.3": 0.12, "0.5": 0.13,
+                                           "0.7": 0.12, "0.9": 0.13},
+               "chance": 0.125}
+        pb, ph = str(tmp_path / "b.json"), str(tmp_path / "h.json")
+        json.dump(rec, open(pb, "w"))
+        rec2 = dict(rec)
+        rec2["probe_acc_by_depth"] = {k: v + 0.05 for k, v in rec["probe_acc_by_depth"].items()}
+        json.dump(rec2, open(ph, "w"))
+        out = str(tmp_path / "fig8.png")
+        mpf.fig8_probe_depth(pb, ph, out)
+        assert os.path.getsize(out) > 1000
+
+    def test_fig8_fails_loud_on_missing_probe_block(self, tmp_path):
+        pytest.importorskip("matplotlib")  # finding #27: CI hosts may lack it
+        sys.path.insert(0, os.path.join(ROOT, "scripts"))
+        import importlib
+        mpf = importlib.import_module("make_paper_figures")
+        p = str(tmp_path / "empty.json")
+        json.dump({}, open(p, "w"))
+        with pytest.raises(SystemExit):
+            mpf.fig8_probe_depth(p, p, str(tmp_path / "x.png"))
+
+    def test_fig1_inset_refuses_on_misaligned_token_grids(self, tmp_path):
+        """Finding #16: with asymmetric resumes the twins' eval rows can land
+        on different tokens_seen grids; the old code silently DROPPED the
+        gap/seed-sigma inset - fig1's decision quantity - shipping a figure
+        without its argument. Now it must refuse loudly when --seed-std is
+        requested but no common grid exists (and still work without it)."""
+        pytest.importorskip("matplotlib")
+        sys.path.insert(0, os.path.join(ROOT, "scripts"))
+        import importlib, csv as _csv
+        mpf = importlib.import_module("make_paper_figures")
+        def wlog(p, shift):
+            with open(p, "w", newline="") as f:
+                w = _csv.writer(f)
+                w.writerow(["step", "tokens_seen", "val_loss"])
+                for s in (1, 2, 3):
+                    w.writerow([s, s * 100 + shift, 5.0 - s * 0.1])
+        pb, ph = str(tmp_path / "b.csv"), str(tmp_path / "h.csv")
+        wlog(pb, 0)
+        wlog(ph, 50)  # misaligned grid
+        with pytest.raises(SystemExit):
+            mpf.fig1_twin_divergence(pb, ph, str(tmp_path / "f.png"), seed_std=0.01)
+        # without seed-std the figure itself must still render
+        mpf.fig1_twin_divergence(pb, ph, str(tmp_path / "f2.png"))
+        assert os.path.getsize(str(tmp_path / "f2.png")) > 1000
+
+    def test_fig3_draws_reverse_arm_when_present(self, tmp_path):
+        """fig3 must carry BOTH halves of H5: forward franken (sufficiency)
+        and anti-franken (necessity). A causal JSON with a reverse block
+        must yield 4 bars; the title must state both closures."""
+        pytest.importorskip("matplotlib")
+        sys.path.insert(0, os.path.join(ROOT, "scripts"))
+        import importlib
+        mpf = importlib.import_module("make_paper_figures")
+        rec = {"base": 0.1, "hla": 0.3, "franken": 0.28, "gap": 0.2,
+               "closure": 0.9, "closure_std_bound": 0.02}
+        rev = {"base": 0.1, "hla": 0.3, "franken": 0.12, "gap": 0.2,
+               "closure": 0.1, "closure_std_bound": 0.02}
+        blob = {"gap_closure": {"induction": rec},
+                "gap_closure_reverse": {"induction": rev}}
+        p = str(tmp_path / "c.json")
+        json.dump(blob, open(p, "w"))
+        out = str(tmp_path / "f3.png")
+        mpf.fig3_gap_closure(p, out)
+        assert os.path.getsize(out) > 1000
+        # forward-only JSON must still work (V7 runs forward first)
+        json.dump({"gap_closure": {"induction": rec}}, open(p, "w"))
+        mpf.fig3_gap_closure(p, str(tmp_path / "f3b.png"))
+        assert os.path.getsize(str(tmp_path / "f3b.png")) > 1000
+
+    def test_fig9_fig10_run_and_refuse(self, tmp_path):
+        """Round-12 reviewer-mitigation figures: fig9 passkey-at-full-window
+        (external anchor, B7) and fig10 induction-head census (Olsson
+        convention, mech-interp ask). Executable on minimal JSONs, loud
+        refusal on wrong inputs."""
+        pytest.importorskip("matplotlib")
+        sys.path.insert(0, os.path.join(ROOT, "scripts"))
+        import importlib
+        mpf = importlib.import_module("make_paper_figures")
+        pb = {f"passkey_acc_{d:02d}": 0.5 for d in range(10, 100, 10)}
+        pb["context_length"] = 2048
+        b, h = str(tmp_path / "b.json"), str(tmp_path / "h.json")
+        json.dump(pb, open(b, "w"))
+        json.dump(pb, open(h, "w"))
+        mpf.fig9_passkey_depth(b, h, str(tmp_path / "f9.png"))
+        assert os.path.getsize(str(tmp_path / "f9.png")) > 1000
+        pm = {"prefix_matching": {
+            f"L{li:02d}_H{hi:02d}_prefix_match": 0.1
+            for li in range(2) for hi in range(4)}}
+        ab, ah = str(tmp_path / "ab.json"), str(tmp_path / "ah.json")
+        json.dump(pm, open(ab, "w"))
+        json.dump(pm, open(ah, "w"))
+        mpf.fig10_head_census(ab, ah, str(tmp_path / "f10.png"))
+        assert os.path.getsize(str(tmp_path / "f10.png")) > 1000
+        with pytest.raises(SystemExit):
+            mpf.fig9_passkey_depth(ab, ab, str(tmp_path / "x.png"))
+        with pytest.raises(SystemExit):
+            mpf.fig10_head_census(b, b, str(tmp_path / "x.png"))
+
+    def test_docs_cover_shipped_metrics(self):
+        """Round-17 (AEC audit): docs/METRICS.md must document every metric
+        family the code actually ships, and EXPERIMENT_CARD must register
+        the post-R12 additions. Docs drifting from code is the top artifact-
+        evaluation complaint."""
+        md = open(os.path.join(ROOT, "docs", "METRICS.md")).read()
+        for needle in ("posloss_bin", "passkey_acc", "min_detectable_gap_z3",
+                       "gap_over_noise_z", "prefix_match", "snr_needle_last",
+                       "sink_mass_first"):
+            assert needle in md, f"METRICS.md missing {needle}"
+        ec = open(os.path.join(ROOT, "docs", "EXPERIMENT_CARD.md")).read().lower()
+        for needle in ("passkey", "powered", "census", "wake", "s43"):
+            assert needle in ec, f"EXPERIMENT_CARD missing {needle}"
+        th = open(os.path.join(ROOT, "docs", "THEORY.md")).read()
+        assert "Theorem 5.1" in th and "wake order" in th.lower(), \
+            "THEORY.md must scope Theorem 5 with the wake-order refinement"
+        st = open(os.path.join(ROOT, "docs", "STERILITY.md")).read().lower()
+        for needle in ("adamw", "franken", "knockout", "resume"):
+            assert needle in st, f"STERILITY.md missing level: {needle}"
+        # Budget numbers in the card must match the ACTUAL 9h-pair configs
+        # (finding #24: the card described the retired 17900-step plan only).
+        import json as _json
+        c = _json.load(open(os.path.join(
+            ROOT, "configs", "kaggle_200m_hla_9h_s42.json")))
+        assert str(c["max_steps"]) in ec, \
+            "EXPERIMENT_CARD must state the 9h-pair max_steps"
+        assert "262,144" in ec or "262144" in ec.replace(",", ""), \
+            "EXPERIMENT_CARD must state tokens/update"
+
+    def test_fig1_legend_never_under_inset(self):
+        """Finding #26 (fresh-eyes audit on REALISTIC curves): the default
+        legend lands upper-right - exactly under the gap/sigma inset - when
+        both loss curves decrease monotonically (which real training curves
+        do). The legend must be pinned away from the inset region."""
+        src = open(os.path.join(ROOT, "scripts", "make_paper_figures.py")).read()
+        i = src.find("def fig1_twin_divergence")
+        j = src.find("def fig2")
+        body = src[i:j]
+        assert 'legend(loc="lower left")' in body, \
+            "fig1 legend must be pinned (default lands under the inset)"
