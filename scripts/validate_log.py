@@ -36,11 +36,40 @@ def main() -> None:
             if header is None:
                 header = row
             else:
-                rows.append(dict(zip(header, row)))
+                rows.append(dict(zip(header, row, strict=False)))  # ragged rows allowed pre-crash
     if header is None:
         raise RuntimeError("no CSV header found")
     if not rows:
         raise RuntimeError("no data rows found")
+
+    # Finding #14 (autoresume contract): a resumed run re-logs steps from the
+    # last resume checkpoint, so a REAL healthy 200m log contains duplicated
+    # step ranges around each "# resumed" seam. Semantics: keep-LAST per step
+    # (the post-resume row is the surviving history), then require the
+    # deduplicated sequence to be strictly monotonic. Truncated crash rows
+    # (missing step/train_loss cells) are tolerated and counted, not fatal -
+    # they are the expected fossil of the crash the resume recovered from.
+    n_truncated = 0
+    n_reseam = 0
+    dedup: dict = {}
+    order: list = []
+    for r in rows:
+        if "step" not in r or "tokens_seen" not in r or "train_loss" not in r:
+            n_truncated += 1
+            continue
+        try:
+            step = int(r["step"])
+        except ValueError:
+            n_truncated += 1
+            continue
+        if step in dedup:
+            n_reseam += 1
+        else:
+            order.append(step)
+        dedup[step] = r
+    if not dedup:
+        raise RuntimeError("no complete data rows found")
+    rows = [dedup[s] for s in order]
 
     prev_step = -1
     prev_tokens = -1
@@ -72,7 +101,8 @@ def main() -> None:
     if n_finite_val == 0:
         raise RuntimeError("no finite val_loss anywhere - eval never ran")
     print(f"LOG VALID: rows={len(rows)} eval_rows={n_finite_val} "
-          f"final_step={prev_step} final_tokens={prev_tokens}")
+          f"final_step={prev_step} final_tokens={prev_tokens} "
+          f"resume_dups={n_reseam} truncated_rows={n_truncated}")
 
 
 if __name__ == "__main__":

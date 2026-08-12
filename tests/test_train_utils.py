@@ -319,7 +319,8 @@ class TestTpuDay1Fixes:
             "grad-checkpointing must fall back (not crash) on torch/xla mismatch")
 
     def test_kaggle_200m_configs_disable_grad_checkpointing(self):
-        import glob as _glob, json as _json
+        import glob as _glob
+        import json as _json
         for f in _glob.glob(os.path.join(ROOT, "configs", "kaggle_*.json")) + \
                  _glob.glob(os.path.join(ROOT, "configs", "200m_*.json")):
             cfg = _json.load(open(f))
@@ -442,12 +443,18 @@ class TestHbmBudget:
                 * int(m["block_size"]) ** 2 * 4 * n_buffers)
 
     def test_tpu_v3_configs_fit_hbm(self):
-        import glob as _glob, json as _json
-        pats = ("kaggle_*.json", "200m_*.json", "tpu3_200m_*.json")
+        import glob as _glob
+        import json as _json
+        # Finding #13: pattern lists rot (tpu3_abl_* escaped findings 7/10).
+        # Budget-check EVERY 8-core config with a 2048 block instead.
         checked = 0
-        for pat in pats:
-            for p in sorted(_glob.glob(os.path.join(ROOT, "configs", pat))):
-                cfg = _json.load(open(p))
+        for p in sorted(_glob.glob(os.path.join(ROOT, "configs", "*.json"))):
+            cfg = _json.load(open(p))
+            if cfg.get("num_cores", 8) != 8:
+                continue
+            if int(cfg.get("model", {}).get("block_size", 0)) < 2048:
+                continue
+            if True:
                 got = self._attn_bytes(cfg)
                 assert got <= self.ATTN_BUDGET, (
                     f"{os.path.basename(p)}: fp32-softmax residency "
@@ -459,7 +466,8 @@ class TestHbmBudget:
     def test_tokens_per_update_invariant_preserved(self):
         """The OOM fixes (b16->2->1, accum 1->8->16) must NOT change the
         optimization trajectory: tokens/update stays 262,144 everywhere."""
-        import glob as _glob, json as _json
+        import glob as _glob
+        import json as _json
         pats = ("kaggle_*.json", "200m_*.json", "tpu3_200m_*.json")
         for pat in pats:
             for p in sorted(_glob.glob(os.path.join(ROOT, "configs", pat))):
@@ -518,7 +526,8 @@ class TestHbmBudget:
         have nan val_loss on most rows. validate_log.py's default mode
         rejected EVERY real pilot log. Contract now: nan val rows fine,
         present val values must be finite, and >=1 eval row must exist."""
-        import subprocess, sys as _sys
+        import subprocess
+        import sys as _sys
         p = tmp_path / "log.csv"
         p.write_text(
             "step,tokens_seen,train_loss,val_loss\n"
@@ -546,7 +555,8 @@ class TestHbmBudget:
         worst case -20% -> ~1.8h follow-up, <=500 steps lost. This trades
         the old hard-pessimism bound for +0.78B tokens (14.5 -> 18.1
         tok/param), which strengthens the primary comparison."""
-        import glob as _glob, json as _json
+        import glob as _glob
+        import json as _json
         found = 0
         for p in sorted(_glob.glob(os.path.join(ROOT, "configs", "kaggle_200m_*_9h_*.json"))):
             c = _json.load(open(p))
@@ -564,4 +574,191 @@ class TestHbmBudget:
             assert steps * 262144 <= 4_700_000_000
             assert int(c["resume_every"]) <= 500, "need resume for session-splits"
             found += 1
-        assert found == 2, "expected the base+hla 9h pair"
+        # s42 pair + s43 pair (R1-W2 seed-replication, round 12)
+        assert found in (2, 4), "expected the base+hla 9h pair(s)"
+        assert found % 2 == 0, "9h configs must come in base/hla pairs"
+
+    def test_crash_save_master_only(self):
+        """Finding #11 (V5): all 8 ranks wrote full fp32 model+Adam crash
+        payloads (~2.4 GB each at 200m = 19 GB per crash) - the session
+        disk died before anything could be salvaged (output 0 B). Ranks
+        are data-parallel twins after the last completed step, so one
+        file carries all information: only rank 0 may write."""
+        src = open(os.path.join(ROOT, "src", "train_xla.py")).read()
+        i = src.find("Training crashed")
+        assert i > 0
+        window = src[i:i + 600]
+        assert "if rank != 0:" in window and "raise" in window, (
+            "non-master ranks must re-raise BEFORE the crash-save block")
+
+
+@pytest.mark.slow
+class TestBitExactResume:
+    """Round-8 audit, THE V7 contract: an interrupted-then-resumed run must
+    equal the continuous run BIT-FOR-BIT - final weights identical and the
+    per-step train-loss trajectory identical after seam dedup. The 9h 200m
+    sessions WILL resume; if resume shifted the data order or optimizer
+    state even slightly, the sterile-twin comparison would silently rot.
+    Proven live in the sandbox first (worst weight diff 0.000e+00)."""
+
+    def _dry(self, cfg_path, *overrides):
+        import subprocess
+        cmd = [sys.executable, os.path.join(ROOT, "scripts", "dry_run_cpu.py"),
+               "--config", cfg_path]
+        for ov in overrides:
+            cmd += ["--override", ov]
+        return subprocess.run(cmd, capture_output=True, text=True, cwd=ROOT)
+
+    def test_resumed_equals_continuous(self, tmp_path):
+        import json
+        import csv
+        import subprocess
+        # 3 sequential trainer subprocesses at ~0.5GB each on top of the
+        # pytest parent: skip on very low-memory sandboxes (verified live
+        # there instead; CI/Codespaces run it in full).
+        try:
+            avail_kb = int(next(ln for ln in open("/proc/meminfo")
+                                if "MemAvailable" in ln).split()[1])
+            if avail_kb < 1_200_000:
+                pytest.skip("needs ~1.2GB free for trainer subprocesses")
+        except (OSError, StopIteration):
+            pass
+        base = json.load(open(os.path.join(
+            ROOT, "configs", "smoke_hla_s42.json")))
+        base["model"].update(n_layer=1, n_head=2, n_embd=32, block_size=32)
+        common = dict(num_workers=0, max_steps=4, val_every=99, svd_every=0,
+                      resume_every=2, save_every=0, val_batches=1,
+                      min_free_gb=0, log_every=1)
+        # dummy data + tiny init
+        r = subprocess.run([sys.executable, os.path.join(
+            ROOT, "scripts", "make_dummy_data.py")],
+            capture_output=True, text=True, cwd=ROOT)
+        assert r.returncode == 0, r.stdout + r.stderr
+        init = str(tmp_path / "init.pt")
+        cfgs = {}
+        for name in ("cont", "resu"):
+            c = dict(base)
+            c.update(common)
+            c.update(run_name=f"{name}_x", save_dir=str(tmp_path / name),
+                     init_ckpt=init)
+            p = str(tmp_path / f"{name}.json")
+            json.dump(c, open(p, "w"))
+            cfgs[name] = p
+        r = subprocess.run([sys.executable, os.path.join(ROOT, "src", "make_init.py"),
+                            "--config", cfgs["cont"], "--out", init],
+                           capture_output=True, text=True, cwd=ROOT)
+        assert r.returncode == 0, r.stdout + r.stderr
+        # continuous 4 steps
+        r = self._dry(cfgs["cont"])
+        assert r.returncode == 0, r.stdout[-2000:] + r.stderr[-2000:]
+        # interrupted at 2, resumed to 4
+        r = self._dry(cfgs["resu"], "max_steps=2")
+        assert r.returncode == 0, r.stdout[-2000:] + r.stderr[-2000:]
+        latest = str(tmp_path / "resu" / "latest_resu_x_resume.pt")
+        assert os.path.exists(latest)
+        r = self._dry(cfgs["resu"], "max_steps=4",
+                      f'resume_ckpt="{latest}"')
+        assert r.returncode == 0, r.stdout[-2000:] + r.stderr[-2000:]
+        # weights bit-equal
+        a = torch.load(str(tmp_path / "cont" / "final_cont_x_bf16.pt"),
+                       map_location="cpu", weights_only=True)
+        b = torch.load(str(tmp_path / "resu" / "final_resu_x_bf16.pt"),
+                       map_location="cpu", weights_only=True)
+        assert set(a) == set(b)
+        for k in a:
+            assert torch.equal(a[k], b[k]), f"resume diverged at {k}"
+        # per-step trajectory equal after seam dedup
+
+        def rows(p):
+            dd = {}
+            for row in csv.reader(open(p)):
+                if row and row[0] and not row[0].startswith("#") and row[0] != "step":
+                    dd[row[0]] = row[3]
+            return dd
+        ca = rows(str(tmp_path / "cont" / "train_log_cont_x.csv"))
+        cb = rows(str(tmp_path / "resu" / "train_log_resu_x.csv"))
+        assert ca == cb, "train-loss trajectories differ after resume"
+
+
+class TestCheckpointCleanup:
+    """Round-10 audit: cleanup_old_checkpoints on a real filesystem. The V7
+    sessions rotate step_* checkpoints on a 20GB disk; a glob that matched
+    best/latest/final would kill resume, a wrong sort would keep the OLD
+    steps. Proven live before becoming a test."""
+
+    def _mk(self, d, run, steps):
+        for s in steps:
+            for suffix in (f"step_{s}_{run}.pt", f"step_{s}_{run}_resume.pt"):
+                open(os.path.join(d, suffix), "w").write("x")
+        protected = [f"best_val_{run}.pt", f"final_{run}_bf16.pt",
+                     f"latest_{run}_resume.pt", f"train_log_{run}.csv"]
+        for f in protected:
+            open(os.path.join(d, f), "w").write("x")
+        return protected
+
+    def test_keeps_last_n_steps_and_protects_specials(self, tmp_path):
+        from src.train_xla import cleanup_old_checkpoints
+        run = "kaggle_200m_base_9h_s42"
+        d = str(tmp_path)
+        protected = self._mk(d, run, (500, 1000, 1500, 2000, 2500))
+        cleanup_old_checkpoints(d, run, keep_last=2)
+        left = sorted(os.listdir(d))
+        steps = sorted({int(f.split("_")[1]) for f in left
+                        if f.startswith("step_")})
+        assert steps == [2000, 2500], f"wrong survivors: {steps}"
+        for f in protected:
+            assert f in left, f"protected file deleted: {f}"
+
+    def test_keep_last_zero_is_noop_and_foreign_runs_untouched(self, tmp_path):
+        from src.train_xla import cleanup_old_checkpoints
+        run = "runA"
+        d = str(tmp_path)
+        self._mk(d, run, (100, 200))
+        open(os.path.join(d, "step_50_runB.pt"), "w").write("x")
+        before = sorted(os.listdir(d))
+        cleanup_old_checkpoints(d, run, keep_last=0)
+        assert sorted(os.listdir(d)) == before
+        cleanup_old_checkpoints(d, run, keep_last=1)
+        assert os.path.exists(os.path.join(d, "step_50_runB.pt"))
+
+
+class TestDuplicateJsonKeys:
+    """Finding #20 (round 15): json.load keeps the LAST duplicate key, so a
+    hand-edited config with a second "lr" silently trains with the wrong
+    value while every downstream gate sees only the collapsed dict. Both
+    config entry points must hard-fail on duplicates at any level."""
+
+    def test_trainer_load_config_rejects_duplicates(self, tmp_path):
+        from src.train_xla import load_config
+        src = open(os.path.join(
+            ROOT, "configs", "kaggle_200m_base_9h_s42.json")).read()
+        evil = src.rstrip().rstrip("}") + ',  "lr": 0.006\n}\n'
+        p = str(tmp_path / "dup.json")
+        open(p, "w").write(evil)
+        with pytest.raises(ValueError, match="duplicate key"):
+            load_config(p)
+        nested = src.replace('"n_layer":', '"n_layer": 24, "n_layer":', 1)
+        p2 = str(tmp_path / "dup2.json")
+        open(p2, "w").write(nested)
+        with pytest.raises(ValueError, match="duplicate key"):
+            load_config(p2)
+        # clean config still loads
+        cfg = load_config(os.path.join(
+            ROOT, "configs", "kaggle_200m_base_9h_s42.json"))
+        assert cfg["lr"] == 0.0006
+
+    def test_validate_configs_rejects_duplicates(self, tmp_path):
+        import subprocess
+        src = open(os.path.join(
+            ROOT, "configs", "kaggle_200m_base_9h_s42.json")).read()
+        evil = src.rstrip().rstrip("}") + ',  "lr": 0.006\n}\n'
+        p = str(tmp_path / "dup.json")
+        open(p, "w").write(evil)
+        r = subprocess.run([sys.executable,
+                            os.path.join(ROOT, "scripts", "validate_configs.py"),
+                            "--base", p, "--hla",
+                            os.path.join(ROOT, "configs",
+                                         "kaggle_200m_hla_9h_s42.json")],
+                           capture_output=True, text=True)
+        assert r.returncode != 0
+        assert "duplicate key" in (r.stdout + r.stderr)

@@ -75,7 +75,7 @@ def audit(path: str) -> dict:
             lo = (1 - beta) + beta * math.exp(-eff)
             env[side] = (lo, hi, pre_clip, clip * lm, beta, rng)
 
-        lo_k, hi_k, pre_k, clip_k, beta_k, rng_k = env["k"]
+        lo_k, hi_k, _pre_k, _clip_k, beta_k, rng_k = env["k"]
         width_k = hi_k / lo_k
         if 1.5 <= width_k <= 12.0:
             report("PASS", "E1", f"K-mix envelope [{lo_k:.3f}, {hi_k:.3f}] width {width_k:.2f}x", counters)
@@ -84,13 +84,13 @@ def audit(path: str) -> dict:
         else:
             report("WARN", "E1", f"K envelope very WIDE ({width_k:.2f}x > 12x): watch mix_k_mean drift + grad noise", counters)
 
-        lo_v, hi_v, pre_v, clip_v, beta_v, rng_v = env["v"]
+        lo_v, hi_v, _pre_v, _clip_v, _beta_v, _rng_v = env["v"]
         if (hi_v / lo_v) < width_k:
             report("PASS", "E2", f"V envelope ({hi_v/lo_v:.2f}x) narrower than K ({width_k:.2f}x)", counters)
         else:
             report("WARN", "E2", f"V envelope ({hi_v/lo_v:.2f}x) >= K ({width_k:.2f}x): content modulated harder than salience - unusual, justify or fix", counters)
 
-        for side, (lo, hi, pre, clip_eff, beta, rng) in env.items():
+        for side, (_lo, _hi, pre, clip_eff, beta, rng) in env.items():
             slack = clip_eff / max(pre, 1e-9)
             if slack >= 1.2:
                 report("PASS", "E3", f"{side.upper()}-clip slack {slack:.2f}x (clip never binds)", counters)

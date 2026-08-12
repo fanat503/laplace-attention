@@ -83,7 +83,7 @@ def main() -> None:
             import tiktoken
         except ImportError:
             raise SystemExit("text prompts need tiktoken (pip install tiktoken); "
-                             "or use --start-ids for raw token ids")
+                             "or use --start-ids for raw token ids") from None
         enc = tiktoken.get_encoding("gpt2")
         ids = enc.encode_ordinary(args.start)
     else:

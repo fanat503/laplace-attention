@@ -350,3 +350,19 @@ class TestTheorem8PairingEquivalence:
         r_chunk = attn._rotate_pairwise(x, torch.cos(ang), torch.sin(ang))
         r_inter = rot_inter(x[..., P], torch.cos(ang), torch.sin(ang))
         assert torch.equal(r_chunk, r_inter[..., torch.argsort(P)])
+
+
+class TestRelatedMechanismSection:
+    """THEORY 4b: the GLA / Selective-RoPE / Bondarenko differentiation must
+    stay in the doc - reviewers of the linear-attention line ask this first,
+    and the franken experiment's boundary claim depends on the decomposition
+    argument written there."""
+
+    def test_neighbors_are_differentiated(self):
+        t = open(os.path.join(ROOT, "docs", "THEORY.md"), encoding="utf-8").read()
+        assert "## 4b." in t
+        for needle in ("Gated DeltaNet", "Selective/adaptive-RoPE",
+                       "Bondarenko", "Corollary 7.1", "franken"):
+            assert needle in t, f"THEORY 4b lost its {needle} differentiation"
+        # the load-bearing claim: decomposition (pre- vs post-softmax gates)
+        assert "pre-softmax" in t and "post-softmax" in t

@@ -35,16 +35,23 @@ def main() -> None:
     missing = [c for c in REQUIRED if c not in idx]
     if missing:
         sys.exit(f"FAIL: CSV missing LITM columns: {missing}")
+    # Truncated crash rows are shorter than the header (finding #14): guard
+    # every cell access or a single crash fossil turns the CI gate into an
+    # IndexError instead of a verdict.
+    def cell(row, col):
+        i = idx[col]
+        return row[i] if i < len(row) else ""
+
     bad = []
     for col in REQUIRED:
-        vals = [float(d[idx[col]]) for d in data if d[idx[col]] != ""]
+        vals = [float(cell(d, col)) for d in data if cell(d, col) != ""]
         if not any(not math.isnan(v) for v in vals):
             bad.append(col)
     if bad:
         sys.exit(f"FAIL: LITM columns all-NaN (probe never ran?): {bad}")
-    last = data[-1]
+    last = next((d for d in reversed(data) if cell(d, "pos_10") != ""), data[-1])
     print("LITM trajectory OK:",
-          {c: last[idx[c]] for c in ("pos_10", "pos_50", "pos_90", "litm_middle_drop")})
+          {c: cell(last, c) for c in ("pos_10", "pos_50", "pos_90", "litm_middle_drop")})
 
 
 if __name__ == "__main__":

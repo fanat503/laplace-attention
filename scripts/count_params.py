@@ -23,13 +23,20 @@ def main() -> None:
     model = GPT(GPTConfig(**cfg["model"]))
     groups = {"hla": 0, "embedding": 0, "attention_base": 0, "mlp": 0, "norm": 0, "other": 0}
     for name, p in model.named_parameters():
-        n = p.numel(); lname = name.lower()
-        if any(m in name for m in HLA_MARKERS): groups["hla"] += n
-        elif "wte" in lname or "wpe" in lname: groups["embedding"] += n
-        elif ".attn." in lname or "c_attn" in lname or "c_proj" in lname: groups["attention_base"] += n
-        elif ".mlp." in lname: groups["mlp"] += n
-        elif "ln_" in lname or "ln_f" in lname or "norm" in lname: groups["norm"] += n
-        else: groups["other"] += n
+        n = p.numel()
+        lname = name.lower()
+        if any(m in name for m in HLA_MARKERS):
+            groups["hla"] += n
+        elif "wte" in lname or "wpe" in lname:
+            groups["embedding"] += n
+        elif ".attn." in lname or "c_attn" in lname or "c_proj" in lname:
+            groups["attention_base"] += n
+        elif ".mlp." in lname:
+            groups["mlp"] += n
+        elif "ln_" in lname or "ln_f" in lname or "norm" in lname:
+            groups["norm"] += n
+        else:
+            groups["other"] += n
     groups["total"] = sum(groups.values())
     print(json.dumps(groups, indent=2, sort_keys=True))
 

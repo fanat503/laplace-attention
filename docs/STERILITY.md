@@ -83,3 +83,29 @@ and warmup values sit inside standard-practice bands, checked numerically by
 | bf16 breaking bit-identity on TPU | verified by test (identity holds exactly in bf16) |
 | Metric-induced training difference | diagnostics are read-only (`no_grad`, `detach`); entropy computation gated out of training forwards; SVD/interference run master-only at low cadence |
 | Crash-recovery divergence | resume restores model+optimizer+step; sampler resumes at the exact sample offset; config-hash compatibility check on resume |
+
+## The seven proven levels (audit rounds 7-21; each is a number, not a claim)
+
+Sterility here is not one check but a LADDER - each level subsumes weaker
+failure modes the previous levels cannot see. All seven measured bit-exact
+(0.000e+00) in a single session (round 21):
+
+| # | Level | What silent failure it excludes |
+|---|---|---|
+| 1 | Logits at identity init | mechanism leaks into the forward pass |
+| 2 | Backbone gradients | hidden gradient path splits the twins from step 1 |
+| 3 | Weights after a real AdamW step | optimizer-state asymmetry (the step-0 contract) |
+| 4 | Logits after a bf16 save/load cycle | checkpoint format perturbs the identity |
+| 5 | Franken(identity) vs base | the transplant machinery itself is non-sterile |
+| 6 | Twin probes (induction, LITM) | eval pipeline treats the twins differently |
+| 7 | Knockout deltas at identity | knockout harness has side effects |
+
+Levels 3-5 are, to our knowledge, not reported in comparable architecture
+papers; we consider them the minimum bar for any "sterile twin" claim,
+because training equals (gradients -> optimizer step)^N and evaluation
+equals (checkpoint IO -> probes) - a comparison is only as sterile as its
+weakest stage. Regression tests: TestGradientSterility (2, 3),
+TestPipelineSterilityEndToEnd (4, 5, 6), knockout zeros in the eval suite (7);
+bit-exact resume (TestBitExactResume) extends level 3 across session
+boundaries: an interrupted+resumed run equals the continuous run weight-for-
+weight and row-for-row in the training log.

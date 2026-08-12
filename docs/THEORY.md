@@ -103,7 +103,10 @@ outside the bilinear image (b^sal_j is independent of i; S_i − S_j is additive
 separable — neither is expressible as a bilinear form in general). ∎
 
 *(Numerical witness: with W_Q=0, base attention row = uniform to machine
-precision; activating salience gives max−min ≈ 0.23 over a 11-key row.)*
+precision; activating salience makes the row non-uniform with spread
+max−min of order 10^-1 — e.g. 0.23 and 0.13 for two random draws of
+W_s (seed-dependent, as expected: the CLAIM is non-uniformity, the
+magnitude depends on the draw). Locked by the salience-causality test.)*
 
 ### Theorem 3 (Retrieval isometry). ✓ tested
 R(θ) preserves norms: ‖R(θ)z‖₂ = ‖z‖₂ for every θ, z, and composes as a group
@@ -214,8 +217,10 @@ friendly on TPU; no checkpoint migration) and cite this theorem when asked
 "why not interleaved like the RoPE paper?".
 
 ### Theorem 5 (Non-vanishing first-order signal). ✓ tested
-At Θ₀ the loss gradient w.r.t. mechanism parameters is generically non-zero
-(tanh'(0)=1: the identity point is NOT a saddle by construction), and gradient
+At Θ₀ the loss gradient w.r.t. the PRIMARY mechanism parameters (W_φq, W_φk,
+W_gk, W_gv, W_s, W_gd - each entering through tanh with tanh'(0)=1) is
+generically non-zero: the identity point is NOT a saddle in these coordinates.
+SECONDARY multipliers wake later, in a provable ORDER (see 5.1). Gradient
 descent from the shared init satisfies, to first order in the learning rate,
 
   L_HLA(after step) = L_base(after step) − η‖∇_Θ₀ L‖² + O(η²) ≤ L_base(after step).
@@ -227,6 +232,22 @@ descent direction includes the base direction as a projection; descent along
 a superset of coordinates decreases L at least as much at first order. ∎
 *(Numerical witness: ‖∇_mech‖² ≈ 2·10⁻⁵ > 0 at init on random data — small,
 as expected at the identity point, but strictly positive.)*
+
+#### Theorem 5.1 (Mechanism wake order). ✓ tested (exact zeros verified)
+At Θ₀ the gradients of the SECONDARY parameters vanish EXACTLY, by the chain
+rule, in a fixed order:
+- ∂L/∂r_k = ∂L/∂r_v = 0 (each enters as exp(α·r·tanh(Wx)) with tanh(0)=0:
+  the derivative carries a tanh(Wx) factor that is identically zero at Θ₀);
+- ∂L/∂s_h = 0 (phase budget multiplies angles that are zero);
+- ∂L/∂W_f = 0 while r_f = 0 (the whole forget branch is scaled by r_f);
+- ∂L/∂θ_l = 0 (depth profile multiplies zero-valued mechanism outputs).
+Measured at Θ₀: primary gradients 1e-5–3e-3; ALL secondary gradients 0.0
+exactly (bit-zero, not small). Consequence - a falsifiable training-dynamics
+prediction, pre-registered for fig5: gate/phase trajectories move FIRST;
+range/budget/depth trajectories stay at zero until their gates leave zero,
+then wake. If a secondary parameter moves while its gate is still ~0, our
+reading of the parameterization is wrong and must be reported as an anomaly.
+(Locked by TestMechanismWakeOrder; discovered in audit round 16.)
 
 ---
 
@@ -330,6 +351,30 @@ architecture during training, confounding "mechanism helps" with "curriculum
 helps" - a new axis the ablation matrix cannot isolate. The identity init
 already provides a natural learned ramp: mechanisms grow from exact zero at
 whatever rate the data demands (observable in gate_abs_mean / angle_std).
+
+## 4b. Relation to gated linear attention, adaptive rotations, and gated softmax
+
+Reviewers who know the linear-attention line will ask whether HLA's phase and
+gates re-invent Selective-RoPE-style adaptive rotation or GLA-style gating.
+They do not, and the difference is structural, not cosmetic. One sentence per
+neighbor (functional differentiation, not citation listing):
+
+| Neighbor | What is modulated | HLA counterpart | Structural difference |
+|---|---|---|---|
+| GLA / Mamba2 / Gated DeltaNet | recurrent state decay: S_t = G_t (elementwise) S_(t-1) + ... — gating acts on the TIME axis of a linear-attention state | forget arm (FoX-family, separate baseline arm) | HLA's K/V gates have no time axis at all: mix(x) scales a token's key/value amplitude; competition is resolved by softmax, not by state decay |
+| Selective/adaptive-RoPE class | positional angle, content-scaled: angle ~ g(x) * f(t) — the kernel of the rotation is still position t | content phase: angle = f(x) only | at t = const their rotation carries zero information; ours is position-free by construction and COMMUTES with standard RoPE (Corollary 7.1): total rotation = f_pos(t) + f_content(x), a clean superposition of "where" and "what" |
+| Quantizable Transformers (Bondarenko et al., 2023), gated softmax G(x) | post-softmax output scaling: one gate lets a head "do nothing" (kills outlier workaround) | V-gate (transmission channel) | closest single relative of our V-gate — both act after the softmax on what is transmitted. Differences: (i) purpose — theirs suppresses no-op-head outliers for quantization, ours modulates transmission content per token; (ii) HLA pairs it with a separate PRE-softmax K-gate, and the retrieval/transmission split is exactly what the franken-transplant measures; (iii) identity-init: our gates start bit-invisible (sterile twin), theirs do not |
+
+The load-bearing distinction across all three rows is the same: **HLA
+decomposes** — a retrieval-side gate (K, pre-softmax) and a transmission-side
+gate (V, post-softmax) are separate learnable channels with a measurable
+boundary (the franken experiment transplants one side without the other).
+Each neighbor above has a single mechanism doing one job on one axis; none
+of them can express, let alone measure, the retrieval/transmission split
+that is HLA's central claim. Empirical corollary worth reporting either way:
+if Bondarenko-style outlier suppression is a side effect of a trained V-gate,
+our activation_outlier_stats (kurtosis / max-over-rms) on the twins will show
+it — a free secondary result connecting to the quantization literature.
 
 ## 5. Why the FoX-family gate is in the codebase (and why it is not "stealing")
 

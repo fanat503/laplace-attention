@@ -1085,7 +1085,8 @@ class TestGetattrDefaultsSync:
     laplace_range_v 0.25-vs-0.2, beta_v 0.3-vs-0.25."""
 
     def test_all_getattr_defaults_match_gptconfig(self):
-        import re, dataclasses
+        import re
+        import dataclasses
         from src.model import GPTConfig
         src = open(os.path.join(ROOT, "src", "model.py"), encoding="utf-8").read()
         cfg = {f.name: f.default for f in dataclasses.fields(GPTConfig)}
@@ -1107,3 +1108,220 @@ class TestGetattrDefaultsSync:
             if not same:
                 bad.append((name, val, expected))
         assert not bad, f"getattr defaults out of sync with GPTConfig: {bad}"
+
+
+class TestGradientSterility:
+    """Round-7 audit: sterility proven at the GRADIENT level. Logit equality
+    at identity-init was proven long ago, but twins train from GRADIENTS: a
+    hidden gradient path through any zero-initialized mechanism would split
+    the pair from step 1 for reasons unrelated to the mechanisms' function.
+    Every shared (backbone) parameter must receive a BIT-IDENTICAL gradient
+    in base and identity-HLA on the same batch."""
+
+    def test_backbone_gradients_bit_identical_at_identity(self):
+        torch.manual_seed(5)
+        base = GPT(small_cfg(**BASE_KW))
+        hla = GPT(small_cfg(**HLA_KW))
+        hla.load_state_dict(base.state_dict(), strict=False)
+        hla.reset_hla_identity()
+        x = torch.randint(0, 256, (2, 32),
+                          generator=torch.Generator().manual_seed(7))
+        y = torch.randint(0, 256, (2, 32),
+                          generator=torch.Generator().manual_seed(8))
+        for m in (base, hla):
+            m.zero_grad(set_to_none=True)
+            _, loss = m(x, y)
+            loss.backward()
+        nb = dict(base.named_parameters())
+        nh = dict(hla.named_parameters())
+        MECH = ("W_phase", "W_gate", "W_range", "W_qtemp", "W_layer_temp")
+        # True backbone only: the base twin carries the same (disabled) HLA
+        # tensors, which legitimately receive no grad in either model.
+        shared = [k for k in nb if k in nh and nb[k].shape == nh[k].shape
+                  and not any(m in k for m in MECH)]
+        assert len(shared) >= 10, "sanity: expected a real backbone overlap"
+        for k in shared:
+            gb, gh = nb[k].grad, nh[k].grad
+            assert gb is not None and gh is not None, f"missing grad: {k}"
+            assert torch.equal(gb, gh), \
+                f"gradient sterility violated at {k}: max diff " \
+                f"{(gb - gh).abs().max().item():.3e}"
+
+    def test_backbone_bit_identical_after_one_adamw_step(self):
+        """Stronger form: bit-equal grads + shared init + deterministic
+        AdamW => the twins' BACKBONES must still be bit-identical AFTER one
+        real optimizer step, while HLA mechanisms move off identity (they
+        learn). This is the actual step-0 contract of the sterile pair."""
+        torch.manual_seed(5)
+        base = GPT(small_cfg(**BASE_KW))
+        hla = GPT(small_cfg(**HLA_KW))
+        hla.load_state_dict(base.state_dict(), strict=False)
+        hla.reset_hla_identity()
+        x = torch.randint(0, 256, (2, 32),
+                          generator=torch.Generator().manual_seed(7))
+        y = torch.randint(0, 256, (2, 32),
+                          generator=torch.Generator().manual_seed(8))
+        for m in (base, hla):
+            opt = torch.optim.AdamW(m.parameters(), lr=1e-3,
+                                    weight_decay=0.1, betas=(0.9, 0.95))
+            m.zero_grad(set_to_none=True)
+            _, loss = m(x, y)
+            loss.backward()
+            opt.step()
+        nb = dict(base.named_parameters())
+        nh = dict(hla.named_parameters())
+        MECH = ("W_phase", "W_gate", "W_range", "W_qtemp", "W_layer_temp")
+        backbone = [k for k in nb if k in nh and nb[k].shape == nh[k].shape
+                    and not any(mm in k for mm in MECH)]
+        for k in backbone:
+            assert torch.equal(nb[k], nh[k]), f"backbone diverged at {k}"
+        assert hla.hla_identity_error() > 0.0, "mechanisms failed to learn"
+
+
+class TestPerPositionCausality:
+    """Round-10 audit: the strong causality form. Previous tests perturbed
+    only the LAST token; this sweeps EVERY position p with ALL mechanisms
+    inflated (phase, K/V gates, salience, distance, forget, qtemp) and
+    requires bit-zero change in every logit before p."""
+
+    def test_no_position_leaks_backward(self):
+        kw = dict(HLA_KW)
+        kw.update(use_salience_bias=True, salience_alpha=1.0,
+                  use_distance_laplace=True, distance_laplace_alpha=0.5)
+        torch.manual_seed(0)
+        m = GPT(small_cfg(**kw)).eval()
+        randomize_hla(m, std=0.5)
+        T = 32
+        x = torch.randint(0, 256, (1, T),
+                          generator=torch.Generator().manual_seed(3))
+        with torch.no_grad():
+            base_logits, _ = m(x)
+        for p in range(1, T):
+            x2 = x.clone()
+            x2[0, p] = (int(x2[0, p]) + 137) % 256
+            with torch.no_grad():
+                l2, _ = m(x2)
+            assert torch.equal(base_logits[0, :p], l2[0, :p]), \
+                f"future token at {p} leaked into logits before it"
+
+
+class TestMechanismWakeOrder:
+    """Round-16 finding (property, not bug): mechanisms have a WAKE ORDER.
+    mix = (1-b) + b*exp(range*tanh(gate)) gives d(mix)/d(range) = 0 exactly
+    at gate=0 (chain rule through tanh(0)) while d(mix)/d(gate) is alive.
+    So gates learn FIRST, ranges only after gates move off zero - a
+    concrete, testable prediction for the fig5 trajectories: range curves
+    must lag gate curves. Locked as a test so the property (and the paper
+    claim derived from it) survives refactors."""
+
+    def test_range_grads_zero_at_identity_gates_alive(self):
+        torch.manual_seed(0)
+        m = GPT(small_cfg(**HLA_KW))
+        x = torch.randint(0, 256, (2, 32),
+                          generator=torch.Generator().manual_seed(1))
+        m.zero_grad(set_to_none=True)
+        _, loss = m(x, x)
+        loss.backward()
+        for n, p in m.named_parameters():
+            if "W_range_k" in n or "W_range_v" in n:
+                assert p.grad is not None and float(p.grad.abs().max()) == 0.0, \
+                    f"{n}: range grad must be exactly 0 at identity"
+            if "W_gate_k.weight" in n or "W_gate_v.weight" in n:
+                assert p.grad is not None and float(p.grad.abs().max()) > 0.0, \
+                    f"{n}: gate grad must be alive at identity"
+
+    def test_range_grads_wake_after_gates_move(self):
+        torch.manual_seed(0)
+        m = GPT(small_cfg(**HLA_KW))
+        with torch.no_grad():
+            for blk in m.transformer.h:
+                blk.attn.W_gate_k.weight.normal_(0, 0.3)
+                blk.attn.W_gate_v.weight.normal_(0, 0.3)
+        x = torch.randint(0, 256, (2, 32),
+                          generator=torch.Generator().manual_seed(1))
+        m.zero_grad(set_to_none=True)
+        _, loss = m(x, x)
+        loss.backward()
+        for n, p in m.named_parameters():
+            if "W_range_k" in n or "W_range_v" in n:
+                assert float(p.grad.abs().max()) > 0.0, \
+                    f"{n}: range grad must wake once gates are nonzero"
+
+
+class TestHeadPermutationEquivariance:
+    """Round-18: the classic attention-layout detector. Permuting heads
+    consistently across ALL weights (c_attn row blocks, c_proj column
+    blocks, every per-head HLA tensor) must leave logits unchanged up to
+    fp32 noise. Any hidden dependence on head ORDER (a reshape bug in any
+    of the six mechanisms) breaks this immediately - it is the strongest
+    single shape-correctness test we can run on CPU."""
+
+    def test_logits_invariant_under_head_permutation(self):
+        kw = dict(HLA_KW)
+        kw.update(use_salience_bias=True, salience_alpha=1.0,
+                  use_distance_laplace=True, distance_laplace_alpha=0.5,
+                  n_head=4, n_embd=32)
+        torch.manual_seed(0)
+        m = GPT(small_cfg(**kw)).eval()
+        randomize_hla(m, std=0.3)
+        with torch.no_grad():
+            for blk in m.transformer.h:
+                blk.attn.W_phase_scale.normal_(0, 0.2)
+                blk.attn.W_qtemp.weight.normal_(0, 0.3)
+                blk.attn.W_gate_d.weight.normal_(0, 0.3)
+        H = 4
+        C = 32
+        hd = C // H
+        perm = torch.tensor([2, 0, 3, 1])
+        m2 = GPT(small_cfg(**kw)).eval()
+        m2.load_state_dict(m.state_dict())
+        with torch.no_grad():
+            for blk in m2.transformer.h:
+                a = blk.attn
+                W = a.c_attn.weight
+                for s in range(3):
+                    sec = W[s * C:(s + 1) * C].view(H, hd, C)
+                    W[s * C:(s + 1) * C] = sec[perm].reshape(C, C)
+                Pv = a.c_proj.weight.view(C, H, hd)
+                a.c_proj.weight.copy_(Pv[:, perm, :].reshape(C, C))
+                a.W_phase_q.copy_(a.W_phase_q[perm])
+                a.W_phase_k.copy_(a.W_phase_k[perm])
+                a.W_phase_scale.copy_(a.W_phase_scale[perm])
+                a.W_range_k.copy_(a.W_range_k[perm])
+                a.W_range_v.copy_(a.W_range_v[perm])
+                a.W_range_f.copy_(a.W_range_f[perm])
+                for lin in (a.W_gate_k, a.W_gate_v, a.W_gate_sal,
+                            a.W_gate_f, a.W_gate_d, a.W_qtemp):
+                    lin.weight.copy_(lin.weight[perm])
+        x = torch.randint(0, 256, (2, 32),
+                          generator=torch.Generator().manual_seed(1))
+        with torch.no_grad():
+            l1, _ = m(x)
+            l2, _ = m2(x)
+        assert (l1 - l2).abs().max().item() < 1e-4, \
+            "head order leaked into logits - reshape bug in some mechanism"
+
+
+class TestFp64Reference:
+    """Round-18: fp32 forward vs an fp64 replica on a long window with all
+    mechanisms active. Accumulated numerical error must stay at fp32-eps
+    scale - guards against silently unstable exp/cumsum compositions."""
+
+    def test_fp32_matches_fp64_reference(self):
+        kw = dict(HLA_KW)
+        kw.update(use_salience_bias=True, salience_alpha=1.0,
+                  use_distance_laplace=True, distance_laplace_alpha=0.5,
+                  block_size=128)
+        torch.manual_seed(0)
+        m32 = GPT(small_cfg(**kw)).eval()
+        randomize_hla(m32, std=0.3)
+        m64 = GPT(small_cfg(**kw)).eval().double()
+        m64.load_state_dict({k: v.double() if v.is_floating_point() else v
+                             for k, v in m32.state_dict().items()})
+        x = torch.randint(0, 256, (1, 128),
+                          generator=torch.Generator().manual_seed(1))
+        with torch.no_grad():
+            l32, _ = m32(x)
+            l64, _ = m64(x)
+        err = float((l32.double() - l64).abs().max())
+        assert err < 1e-3, f"fp32 error vs fp64 reference too large: {err:.3e}"

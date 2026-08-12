@@ -38,7 +38,16 @@ FLOPS_MATCHED_EXTRA_DIFFS = {
 
 def load(path: str) -> Dict[str, Any]:
     with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+        def _no_dups(pairs):
+            d = {}
+            for k, v in pairs:
+                if k in d:
+                    raise SystemExit(
+                        f"duplicate key {k!r} in {path} - json.load would "
+                        f"silently keep the LAST value (finding #20)")
+                d[k] = v
+            return d
+        return json.load(f, object_pairs_hook=_no_dups)
 
 
 def flatten(d: Dict[str, Any], prefix: str = "") -> Dict[str, Any]:

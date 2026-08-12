@@ -21,6 +21,7 @@ data = ["datasets>=2.19", "tiktoken>=0.6", "tqdm>=4.66"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q -W error::UserWarning"
+markers = ["slow: full trainer-loop tests (seconds each)"]
 
 [tool.setuptools]
 packages = ["src"]

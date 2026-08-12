@@ -27,6 +27,20 @@ INDUCTION_TOK_A_OFFSET = 10
 INDUCTION_TOK_B_OFFSET = 50
 
 
+def _mask_padded_logits(model, logits: torch.Tensor) -> torch.Tensor:
+    """Finding #19: with padded_vocab_size > vocab_size the raw lm_head
+    logits carry pad-classes that the MODEL's own loss masks out, but eval
+    code did not - softmax denominators included up to 47 phantom classes
+    (measured +9.4e-4 CE inflation on random init) and P(target) probes
+    were correspondingly deflated. Symmetric for both twins but biased vs
+    the true model distribution; every eval must mask before softmax/CE."""
+    v = int(getattr(model.config, "vocab_size", logits.size(-1)))
+    if logits.size(-1) > v:
+        logits = logits.clone()
+        logits[..., v:] = torch.finfo(logits.dtype).min
+    return logits
+
+
 @torch.no_grad()
 def evaluate_induction(model, device, seed: int = 42, batch_size: int = 32) -> float:
     was_training = model.training
@@ -66,7 +80,7 @@ def evaluate_induction(model, device, seed: int = 42, batch_size: int = 32) -> f
         logits, _ = model(tokens)
         if not bool(torch.isfinite(logits).all().detach().cpu().item()):
             return float("nan")
-        probs = torch.softmax(logits[:, pos_a2, :].float(), dim=-1)
+        probs = torch.softmax(_mask_padded_logits(model, logits[:, pos_a2, :].float()), dim=-1)
         return float(probs.gather(1, target_ids[:, None]).mean().detach().cpu().item())
     finally:
         model.train(was_training)
@@ -114,7 +128,7 @@ def depth_profile_statistics(model) -> Dict[str, float]:
     out: Dict[str, float] = {}
     temps = []
     budgets = []
-    for i, block in enumerate(model.transformer.h):
+    for block in model.transformer.h:
         attn = block.attn
         if getattr(attn, "layer_dependent_gate", False) and getattr(attn, "learnable_layer_temp", False):
             depth = float(attn.layer_idx) / float(max(1, attn.n_layer))
@@ -329,7 +343,7 @@ def evaluate_distractor_induction(
     model.eval()
     try:
         T = min(512, model.config.block_size)
-        if model.config.vocab_size < 20000 or T < 8 * (n_distractors + 2):
+        if model.config.vocab_size < 20000 or 8 * (n_distractors + 2) > T:
             return {"distractor_induction": float("nan"), "distractor_margin": float("nan")}
 
         g = torch.Generator(device="cpu")
@@ -367,7 +381,7 @@ def evaluate_distractor_induction(
         logits, _ = model(tokens.to(device))
         if not bool(torch.isfinite(logits).all().detach().cpu().item()):
             return {"distractor_induction": float("nan"), "distractor_margin": float("nan")}
-        probs = torch.softmax(logits[:, pos_a2, :].float(), dim=-1).cpu()  # (B, V)
+        probs = torch.softmax(_mask_padded_logits(model, logits[:, pos_a2, :].float()), dim=-1).cpu()  # (B, V)
 
         p_b = probs.gather(1, tok_b[:, None]).squeeze(1)                  # (B,)
         p_d = probs.gather(1, d_tokens[:, :, 1])                          # (B, n_distr): P(D_j)
@@ -422,13 +436,13 @@ def head_interference_statistics(
     def _col_basis(M: torch.Tensor, k: int) -> torch.Tensor:
         # Basis for column space of M (C x hd), directions live in R^C.
         U, S, _ = torch.linalg.svd(M.detach().float().cpu(), full_matrices=False)
-        r = int((S > 1e-6 * float(S.max().clamp_min(1e-12))).sum())
+        r = int((1e-6 * float(S.max().clamp_min(1e-12)) < S).sum())
         return U[:, : min(k, r)].contiguous()
 
     def _row_basis(M: torch.Tensor, k: int) -> torch.Tensor:
         # Basis for row space of M (hd x C), directions live in R^C.
         _, S, Vh = torch.linalg.svd(M.detach().float().cpu(), full_matrices=False)
-        r = int((S > 1e-6 * float(S.max().clamp_min(1e-12))).sum())
+        r = int((1e-6 * float(S.max().clamp_min(1e-12)) < S).sum())
         return Vh[: min(k, r), :].T.contiguous()
 
     def _overlap(A: torch.Tensor, B: torch.Tensor) -> float:
@@ -735,7 +749,7 @@ def mechanism_knockout(model, batch, targets, mechanisms=("phase", "gates", "sal
             for blk in model.transformer.h:
                 setattr(blk.attn, attr, 0.0)
             _, ko_loss = model(batch, targets)
-            for blk, v in zip(model.transformer.h, saved):
+            for blk, v in zip(model.transformer.h, saved, strict=True):
                 setattr(blk.attn, attr, v)
             out[f"ko_{mech}_delta"] = float(ko_loss) - float(base_loss)
         return out
@@ -782,7 +796,7 @@ def positional_recall_curve(model, device="cpu", seed: int = 42, batch_size: int
                 tokens[i, T - 2] = a           # query near the end
                 targets.append(b)
             logits, _ = model(tokens)
-            probs = torch.softmax(logits[:, T - 2, :].float(), dim=-1)
+            probs = torch.softmax(_mask_padded_logits(model, logits[:, T - 2, :].float()), dim=-1)
             t = torch.tensor(targets, device=device)
             pb = float(probs.gather(1, t[:, None]).mean().detach().cpu())
             out[f"pos_{int(frac * 100):02d}"] = pb
@@ -907,6 +921,11 @@ def prefix_matching_score(model, device="cpu", seed: int = 42, batch_size: int =
             score = att[:, :, pos_a2, pos_a1 + 1].float().mean(dim=0)  # (H,)
             out[f"L{li:02d}_prefix_match_max"] = float(score.max())
             out[f"L{li:02d}_prefix_match_mean"] = float(score.mean())
+            # Per-head census (mech-interp reviewer ask): WHICH heads become
+            # induction heads, not just how strong the strongest one is.
+            # Feeds the base-vs-HLA head-census figure.
+            for hi in range(score.shape[0]):
+                out[f"L{li:02d}_H{hi:02d}_prefix_match"] = float(score[hi])
             gmax = max(gmax, float(score.max()))
         out["prefix_match_global_max"] = gmax
         return out
@@ -980,6 +999,170 @@ def attention_needle_snr(model, device="cpu", seed: int = 42,
         model.train(was_training)
 
 
+@torch.no_grad()
+def per_position_loss_curve(model, tokens: torch.Tensor, device="cpu",
+                            n_bins: int = 8, batch_size: int = 4) -> Dict[str, float]:
+    """Per-position loss on REAL data (the standard long-context metric).
+
+    The synthetic probes (induction/distractor/LITM) are author-created;
+    the field's standard evidence (FoX Fig. 1, Liu et al.) is the loss as
+    a function of POSITION in the context on natural text: a model that
+    truly uses long context keeps improving at late positions; positional
+    pathologies show up as bumps mid-context.
+
+    Args:
+      tokens: (N, T+1) int tensor of REAL validation sequences (inputs are
+        tokens[:, :-1], targets tokens[:, 1:]) - pass a slice of the val
+        set; the function does NOT generate synthetic data by design.
+    Returns:
+      posloss_bin_00..: mean loss per position bin (bin 0 = earliest);
+      posloss_early_late_ratio: bin0_loss / lastbin_loss (>1 = late
+        positions genuinely benefit from context; ~1 = context unused);
+      posloss_mid_bump: max(middle bins) - interp(early, late) - positive
+        values flag a mid-context pathology on real data (the honest,
+        non-synthetic counterpart of litm_middle_drop).
+    """
+    was_training = model.training
+    model.eval()
+    try:
+        N, T1 = tokens.shape
+        T = min(T1 - 1, model.config.block_size)
+        if N < 1 or n_bins * 4 > T:
+            return {"posloss_early_late_ratio": float("nan"),
+                    "posloss_mid_bump": float("nan")}
+        x = tokens[:, :T].to(device)
+        y = tokens[:, 1:T + 1].to(device)
+        loss_sum = torch.zeros(T)
+        n_rows = 0
+        for s0 in range(0, N, batch_size):
+            xb, yb = x[s0:s0 + batch_size], y[s0:s0 + batch_size]
+            logits, _ = model(xb)
+            logits = _mask_padded_logits(model, logits.float())
+            ls = torch.nn.functional.cross_entropy(
+                logits.reshape(-1, logits.size(-1)),
+                yb.reshape(-1), reduction="none").reshape(yb.shape)
+            # Finding #15: summing per-batch MEANS overweights a short final
+            # batch (its rows counted at 1/len(last) instead of 1/N; measured
+            # bin drift up to 1.2e-2 at N=5,bs=4). Row-sum + row-count keeps
+            # every sequence at exactly weight 1/N.
+            loss_sum += ls.sum(0).detach().cpu()
+            n_rows += int(yb.shape[0])
+        per_pos = loss_sum / max(n_rows, 1)
+        edges = torch.linspace(0, T, n_bins + 1, dtype=torch.long)
+        bins = [float(per_pos[edges[i]:edges[i + 1]].mean())
+                for i in range(n_bins)]
+        out = {f"posloss_bin_{i:02d}": b for i, b in enumerate(bins)}
+        early, late = bins[0], bins[-1]
+        out["posloss_early_late_ratio"] = early / late if late > 0 else float("nan")
+        mid = bins[1:-1]
+        interp = [(early + (late - early) * (i + 1) / (n_bins - 1))
+                  for i in range(len(mid))]
+        out["posloss_mid_bump"] = float(max(m - e for m, e in zip(mid, interp, strict=True)))
+        return out
+    finally:
+        model.train(was_training)
+
+
+@torch.no_grad()
+def attention_sink_stats(model, device="cpu", seed: int = 42,
+                         batch_size: int = 2) -> Dict[str, float]:
+    """Attention-sink mass (Xiao et al., StreamingLLM) - the field-standard
+    positional-pathology readout: what fraction of attention lands on the
+    FIRST tokens regardless of content.
+
+      sink_mass_first  : mean attention to position 0 from queries > 16
+      sink_mass_first4 : same for positions 0-3
+      sink_top_layer   : max per-layer sink_mass_first (sinks concentrate)
+
+    Paper reading: HLA's salience/distance channels claim to REDUCE the
+    model's need for a garbage-collector sink (attention has a content-
+    conditioned place to put mass). base-vs-HLA sink_mass on the twins is
+    the direct test - and connects our story to the attention-sink line
+    of work reviewers know. ~1/T at random init (no sink yet; measured),
+    grows with training in vanilla transformers.
+    """
+    was_training = model.training
+    prev_diag = bool(model.transformer.h[0].attn.capture_diagnostics)
+    prev_attn = bool(model.transformer.h[0].attn.capture_attention)
+    model.eval()
+    model.set_diagnostics(enabled=True, capture_attention=True)
+    try:
+        T = min(256, model.config.block_size)
+        if T < 32:
+            return {"sink_mass_first": float("nan"),
+                    "sink_mass_first4": float("nan"),
+                    "sink_top_layer": float("nan")}
+        g = torch.Generator(device="cpu")
+        g.manual_seed(seed)
+        tokens = torch.randint(0, model.config.vocab_size, (batch_size, T),
+                               generator=g).to(device)
+        model(tokens)
+        per_layer_first = []
+        per_layer_first4 = []
+        for block in model.transformer.h:
+            att = getattr(block.attn, "last_attn", None)
+            if att is None:
+                continue
+            att = att.detach().float()          # (B, H, Tq, Tk)
+            rows = att[:, :, 16:, :]            # queries past the sink zone
+            per_layer_first.append(float(rows[..., 0].mean()))
+            per_layer_first4.append(float(rows[..., :4].sum(-1).mean()))
+        if not per_layer_first:
+            return {"sink_mass_first": float("nan"),
+                    "sink_mass_first4": float("nan"),
+                    "sink_top_layer": float("nan")}
+        return {"sink_mass_first": float(sum(per_layer_first) / len(per_layer_first)),
+                "sink_mass_first4": float(sum(per_layer_first4) / len(per_layer_first4)),
+                "sink_top_layer": float(max(per_layer_first))}
+    finally:
+        model.set_diagnostics(enabled=prev_diag, capture_attention=prev_attn)
+        model.train(was_training)
+
+
+@torch.no_grad()
+def activation_outlier_stats(model, device="cpu", seed: int = 42,
+                             batch_size: int = 2) -> Dict[str, float]:
+    """Residual-stream activation outliers (Diff Transformer Sec. 3.7,
+    Bondarenko et al.) - excess kurtosis and max/rms ratio of the residual
+    stream at the last block.
+
+    Paper reading: architectures that clean attention noise empirically
+    reduce activation outliers (Diff Tr. Table: quantization robustness).
+    If HLA's twins diverge here, it is a free secondary claim reviewers
+    from the quantization community will recognize. Gaussian baseline:
+    excess kurtosis ~0 (measured ~0.05 at random init), max/rms ~4-5 for
+    n_embd-sized samples.
+    """
+    was_training = model.training
+    model.eval()
+    try:
+        T = min(256, model.config.block_size)
+        g = torch.Generator(device="cpu")
+        g.manual_seed(seed)
+        tokens = torch.randint(0, model.config.vocab_size, (batch_size, T),
+                               generator=g).to(device)
+        feats = {}
+
+        def hook(_m, _i, out):
+            h = out[0] if isinstance(out, tuple) else out
+            feats["h"] = h.detach().float()
+
+        hd = model.transformer.h[-1].register_forward_hook(hook)
+        try:
+            model(tokens)
+        finally:
+            hd.remove()
+        h = feats["h"].reshape(-1)
+        mu, sd = h.mean(), h.std().clamp_min(1e-12)
+        z = (h - mu) / sd
+        kurt = float((z ** 4).mean()) - 3.0
+        max_over_rms = float(h.abs().max() / h.pow(2).mean().sqrt().clamp_min(1e-12))
+        return {"act_excess_kurtosis": kurt,
+                "act_max_over_rms": max_over_rms}
+    finally:
+        model.train(was_training)
+
+
 __all__ = [
     "evaluate_induction",
     "evaluate_distractor_induction",
@@ -997,5 +1180,8 @@ __all__ = [
     "gate_redundancy_statistics",
     "positional_recall_curve",
     "attention_needle_snr",
+    "per_position_loss_curve",
+    "attention_sink_stats",
+    "activation_outlier_stats",
     "prefix_matching_score",
 ]

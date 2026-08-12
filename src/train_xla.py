@@ -1768,10 +1768,17 @@ def _train_worker_fn(index: int, config: Dict[str, Any]) -> None:
         master_print("[ERROR] Training crashed. Attempting best-effort crash save...")
         if master:
             traceback.print_exc()
+        if rank != 0:
+            raise  # finding #11: non-masters skip crash save (8x2.4GB killed V5 disk)
         try:
-            # Each worker writes its own rank-specific crash file.
-            # No rendezvous (could hang if some workers died).
-            # No single-master dependency (master may have died).
+            # Finding #11 (V5 disk blow-up): ALL 8 ranks used to write a full
+            # fp32 model+Adam payload (~2.4 GB each at 200m -> 19 GB per
+            # crash), which killed the session's disk before anything could
+            # be salvaged. The twins are data-parallel: after the last
+            # completed optimizer step every rank holds IDENTICAL state, so
+            # one crash file carries all information. Rank 0 writes the full
+            # resume payload; other ranks write nothing (if rank 0 died
+            # before the save, the resume_every checkpoint is the fallback).
             crash_path = os.path.join(
                 save_dir, f"crash_rank{rank}_{run_name}_step{completed_step}_resume.pt"
             )
@@ -1831,9 +1838,22 @@ def train_worker_xla(config: Dict[str, Any]) -> None:
               nprocs=(1 if nprocs == 1 else None), start_method=start_method)
 
 
+def _reject_duplicate_keys(pairs):
+    """Finding #20: json.load silently keeps the LAST duplicate key, so a
+    hand-edited config with an accidental second "lr" trains with the wrong
+    value while every gate sees only the collapsed dict. Duplicates at ANY
+    nesting level are a hard error."""
+    d = {}
+    for k, v in pairs:
+        if k in d:
+            raise ValueError(f"duplicate key {k!r} in config JSON")
+        d[k] = v
+    return d
+
+
 def load_config(path: str) -> Dict[str, Any]:
     with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+        return json.load(f, object_pairs_hook=_reject_duplicate_keys)
 
 
 def apply_override(config: Dict[str, Any], item: str) -> None:

@@ -243,6 +243,52 @@ Unlike the other §10 probes this one IS captured during training (at the
 model, but reviewers will ask *when* the flattening emerges — a
 final-checkpoint number cannot answer that; a trajectory can.
 
+### `attention_sink_stats(model)` — attention-sink mass (StreamingLLM standard)
+
+`sink_mass_first` / `sink_mass_first4`: fraction of attention (queries >16)
+landing on the first token(s); `sink_top_layer`: worst layer. Calibrated:
+ratio 1.00 to the uniform-attention expectation at random init (no sink).
+Pre-registered reading: HLA's content-conditioned channels reduce the need
+for a garbage-collector sink vs base - connects the paper to the
+attention-sink literature reviewers know (Xiao et al.).
+
+### `activation_outlier_stats(model)` — residual outliers (Diff Tr. Sec 3.7)
+
+`act_excess_kurtosis` (~0 Gaussian; measured -0.03 at init) and
+`act_max_over_rms` (~4-5 Gaussian) of the last block's residual stream.
+Training-induced outliers push both up; architectures that clean attention
+noise empirically reduce them (quantization-robustness secondary claim).
+
+### `per_position_loss_curve(model, tokens)` — real-data position curve
+
+The field-standard long-context readout (FoX Fig.1 style; Liu et al.):
+mean loss per position bin on REAL validation sequences. Scalars:
+`posloss_early_late_ratio` (>1 = late positions genuinely benefit from
+context; calibrated 0.998 at random init on IID tokens) and
+`posloss_mid_bump` (positive = mid-context pathology on natural text -
+the non-synthetic counterpart of `litm_middle_drop`). This is the
+metric-integrity answer to "your probes are author-created": every
+synthetic probe claim is now paired with a standard real-data curve.
+Wired into scripts/analyze_checkpoint.py (`per_position_loss` block).
+
+### `train_probe.py` — position-conditioned linear probing (H4-P)
+
+Ridge probe (closed-form, deterministic) on the residual stream at the query
+position: decode WHICH B-token the needle carried (8 classes, chance 0.125)
+as a function of needle depth (10..90%) and layer. Scalars:
+`probe_acc_middle`, `probe_acc_edge`, `probe_litm_gap` = edge − middle
+(0 = mid-context information is as linearly accessible as edge).
+Selection discipline: layer AND ridge-lambda are chosen on a VALIDATION
+split; the reported scalar is TEST accuracy of that choice (max-over-layers
+on the reporting split would be biased up by ~sigma*sqrt(2 ln L)).
+Honesty control: `probe_selectivity` = real-labels minus shuffled-labels
+accuracy at the selected layer (Hewitt & Liang, 2019) - near 0 means the
+probe memorizes rather than reads features; report it next to the gap.
+Pre-registered reading (H4-P): HLA flattens probe_litm_gap vs base — the
+information-ACCESS counterpart of the attention-level snr_needle and the
+behavioral pos_XX curve: three independent measurement levels of the same
+claim. Calibration-tested: chance at random init, ~1.0 on a planted signal.
+
 ### `attention_needle_snr(model)`
 
 Activation-level retrieval signal-to-noise (adapted from Diff Transformer's
@@ -279,3 +325,44 @@ retrieval geometry causally carries the gain; <20% = mechanistic story
 revised. Transplant sets: qk | phase | retrieval | full (full == HLA exactly;
 tested). W_layer_temp is deliberately not transplanted (mixed K/V allegiance
 - documented limitation).
+
+### `per_position_loss_curve(model, tokens)` → `posloss_bin_00..`, `posloss_early_late_ratio`, `posloss_mid_bump`
+
+Per-position CE on REAL validation sequences (FoX Fig. 1 / Liu et al.
+convention), equal weight per sequence (finding #15) and computed against
+the model's masked objective (finding #19: pad classes excluded, so the
+bins sum consistently with the trainer's val loss). `early_late_ratio > 1`
+= late positions genuinely benefit from context; `mid_bump > 0` flags a
+mid-context pathology on natural text — the non-synthetic counterpart of
+`litm_middle_drop`. Feeds fig6.
+
+### `scripts/eval_passkey.py` → `passkey_acc_XX`, `passkey_token_XX`, `passkey_middle_vs_edge`
+
+Field-standard passkey retrieval (Mohtashami & Jaggi 2023) at the FULL
+context window (T = block_size): plant `[M][k1..kL]` at a depth fraction,
+query `[M]` at the window end, greedy-decode L tokens, exact-match.
+Chance ≈ (1/2000)^5 ≈ 0, so any nonzero bar is signal; calibration test
+pins 0.000 at random init. This is the external-anchor eval (review
+mitigation B7): an author-independent task at the full training length.
+Feeds fig9.
+
+### H5 power fields (in every `gap_closure` record)
+
+`min_detectable_gap_z3` = 3·max(probe std) — the smallest gap the probe
+set can attribute at z = 3; `gap_over_noise_z` = |gap|/std observed;
+`powered` ∈ {0, 1}. The JSON artifact itself states whether the closure
+number is statistically meaningful (review mitigation R2-Q2) — an
+underpowered closure is reported but flagged, never silently trusted.
+
+### Per-head induction census (in `prefix_matching_score`) → `LXX_HYY_prefix_match`
+
+Olsson et al. prefix-matching per HEAD (not just per-layer max): which
+heads become induction heads, and do the sterile twins grow them in the
+same places? Feeds fig10 (two layer×head heatmaps, base vs HLA).
+
+### Mechanism wake order (analytical property, tested)
+
+`mix = (1−β) + β·exp(range·tanh(gate))` ⇒ ∂mix/∂range = 0 exactly at
+gate = 0 while ∂mix/∂gate = β·range > 0: gates must move first, ranges
+wake second. Concrete falsifiable prediction for the fig5 trajectories
+(range curves lag gate curves); locked by TestMechanismWakeOrder.

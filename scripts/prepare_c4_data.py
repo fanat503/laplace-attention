@@ -162,7 +162,7 @@ class BatchEncoder:
                 fast_idx = [i for i in range(len(texts)) if i not in set(slow)]
                 if fast_idx:
                     fast = self._enc_batch([texts[i] for i in fast_idx])
-                    for i, toks in zip(fast_idx, fast):
+                    for i, toks in zip(fast_idx, fast, strict=True):
                         out[i] = list(toks)
                 for i in slow:
                     out[i] = self.reference.encode_ordinary(texts[i])
@@ -197,7 +197,7 @@ def verify_backend_equivalence(tokenizer_name: str, backend: str) -> None:
         "<|endoftext|> literal special-token text",
     ]
     got = enc.encode_batch(probes)
-    for t, g in zip(probes, got):
+    for t, g in zip(probes, got, strict=True):
         ref = enc.reference.encode_ordinary(t)
         if list(g) != list(ref):
             raise SystemExit(

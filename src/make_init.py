@@ -175,11 +175,7 @@ def assert_hla_identity(model: GPT, *, atol: float = 0.0) -> None:
             for i in range(model.config.n_layer)
         )
 
-        if is_hla_attn:
-            max_abs = float(v.detach().float().abs().max().item()) if v.numel() > 0 else 0.0
-            if max_abs > atol:
-                bad.append(f"{k}: max_abs={max_abs} (must be zero)")
-        elif k in HLA_PARAMS_FIXED_INIT:
+        if is_hla_attn or k in HLA_PARAMS_FIXED_INIT:
             max_abs = float(v.detach().float().abs().max().item()) if v.numel() > 0 else 0.0
             if max_abs > atol:
                 bad.append(f"{k}: max_abs={max_abs} (must be zero)")
@@ -352,6 +348,18 @@ def save_shared_backbone_init(
     dtype: Optional[torch.dtype],
     allow_shape_mismatch: bool = False,
 ) -> None:
+    # Sterility gate (init-audit finding): the trainer reads data-order seed
+    # from EACH run's own config. If base and HLA seeds differ, the twins see
+    # different token order - silently NOT token-matched, even though the
+    # shared backbone itself would still verify. validate_configs.py catches
+    # this too, but make_init is callable directly (Kaggle cells do) -
+    # defence in depth: fail here as well.
+    if int(base_config["seed"]) != int(hla_config["seed"]):
+        raise SystemExit(
+            f"STERILITY VIOLATION: base seed={base_config['seed']} != "
+            f"hla seed={hla_config['seed']}. Twins must share the seed, or "
+            "their data order diverges and the pair is not token-matched."
+        )
     # Use base seed for base. HLA seed is irrelevant for copied backbone but used
     # for any non-copied non-HLA tensors if shapes differ.
     base = model_from_config(base_config, seed=int(base_config["seed"]))

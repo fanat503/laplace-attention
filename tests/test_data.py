@@ -148,7 +148,8 @@ class TestTokenizerBackends:
         return mod
 
     def _corpus(self, n=400):
-        import random, string
+        import random
+        import string
         rng = random.Random(7)
         words = ["".join(rng.choices(string.ascii_lowercase, k=rng.randint(2, 10)))
                  for _ in range(2000)]
@@ -246,3 +247,27 @@ class TestTokenizerBackends:
             assert np.array_equal(got, ref), f"{backend}: literal handling diverged from legacy"
             if backend == "gigatoken":
                 assert meta["special_literal_fallback_docs"] == 4
+
+
+class TestFixedDatasetTokenExact:
+    """Round-9 audit: the old non-overlap test checked window ADJACENCY of
+    the first two items only. This one replays the documented invariant
+    idx*(seq_len+1) slicing for EVERY window and every tested block size,
+    token-for-token, plus the tail-drop bound. A silent off-by-one in the
+    stride would leak targets across windows in BOTH twins - invisible in
+    loss curves, fatal for the independence claim behind the val metric."""
+
+    def test_every_window_matches_manual_slice(self, tmp_path):
+        T = torch.arange(1000, dtype=torch.long) % 250
+        p = str(tmp_path / "toks.pt")
+        torch.save(T, p)
+        for block in (16, 64, 128):
+            ds = FixedDataset(p, block, expected_vocab_size=250)
+            n = len(ds)
+            assert n == 1000 // (block + 1)
+            for i in range(n):
+                want = T[i * (block + 1):(i + 1) * (block + 1)]
+                got = ds[i]["input_ids"]
+                assert torch.equal(got.long(), want), f"block={block} idx={i}"
+            dropped = 1000 - n * (block + 1)
+            assert 0 <= dropped < block + 1
