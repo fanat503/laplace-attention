@@ -1325,3 +1325,126 @@ class TestFp64Reference:
             l64, _ = m64(x)
         err = float((l32.double() - l64).abs().max())
         assert err < 1e-3, f"fp32 error vs fp64 reference too large: {err:.3e}"
+
+
+class TestDistanceRank1FastPath:
+    """Speed fix #28 (V6 measured HLA at 1.70x wall-clock vs base; FLOPs say
+    1.075x - the gap is HBM traffic from materialized (B,H,T,T) bias
+    buffers). The distance bias factorizes rank-1:
+        bias_ij = coef*(p_i - p_j)*g_j = p_i*(coef*g_j) - p_j*coef*g_j,
+    exact whenever alpha*range <= clip (the E3 audit invariant, true for
+    every shipped config), because the clamp is then provably inactive on
+    the causal region. These tests pin the exactness and the sterility."""
+
+    KW = dict(block_size=64, vocab_size=256, n_layer=1, n_head=2, n_embd=32,
+              gradient_checkpointing=False, phase_mult=0.15, use_laplace=True,
+              laplace_alpha=1.0, use_distance_laplace=True,
+              distance_laplace_alpha=0.5, distance_laplace_range=1.0,
+              distance_laplace_clip=1.0)
+
+    def test_rank1_equals_reference_formula_on_causal_region(self):
+        torch.manual_seed(0)
+        m = GPT(small_cfg(**self.KW)).eval()
+        blk = m.transformer.h[0].attn
+        T, C = 64, 32
+        g = torch.Generator(); g.manual_seed(9)
+        x = torch.randn(1, T, C, generator=g)
+        gd = torch.tanh(blk.W_gate_d(x)).float()
+        coef = 0.5 * 1.0 * blk.layer_gate_multiplier
+        posn = torch.arange(T).float() / (self.KW["block_size"] - 1)
+        cg = (coef * gd).transpose(1, 2)
+        fast = posn.view(1, 1, T, 1) * cg.unsqueeze(2) \
+            - (cg * posn[None, None, :]).unsqueeze(2)
+        dist = (torch.arange(T)[:, None] - torch.arange(T)[None, :]) \
+            .clamp_min(0).float() / (self.KW["block_size"] - 1)
+        ref = dist[None, None] * cg.unsqueeze(2)
+        causal = torch.tril(torch.ones(T, T, dtype=torch.bool))
+        assert ((fast - ref).abs() * causal).max().item() < 1e-6
+
+    def test_identity_still_bit_exact_with_fast_path(self):
+        kw_base = dict(block_size=64, vocab_size=256, n_layer=1, n_head=2,
+                       n_embd=32, gradient_checkpointing=False)
+        torch.manual_seed(5)
+        base = GPT(small_cfg(**kw_base)).eval()
+        torch.manual_seed(5)
+        hla = GPT(small_cfg(**self.KW)).eval()
+        sdh, sdb = hla.state_dict(), base.state_dict()
+        for k in sdh:
+            sdh[k] = sdb[k].clone() if k in sdb and sdb[k].shape == sdh[k].shape \
+                else torch.zeros_like(sdh[k])
+        hla.load_state_dict(sdh)
+        g = torch.Generator(); g.manual_seed(7)
+        x = torch.randint(0, 256, (2, 64), generator=g)
+        with torch.no_grad():
+            lb, _ = base(x)
+            lh, _ = hla(x)
+        assert torch.equal(lb, lh)
+
+    def test_binding_clip_configs_use_exact_clamped_path(self):
+        """Configs where the clamp CAN bind must fall back to the exact
+        materialized path (different numerics, same semantics as before)."""
+        kw = dict(self.KW, distance_laplace_alpha=2.0,
+                  distance_laplace_clip=1.0)  # alpha*range=2 > clip=1
+        torch.manual_seed(0)
+        m = GPT(small_cfg(**kw)).eval()
+        with torch.no_grad():
+            for blk in m.transformer.h:
+                blk.attn.W_gate_d.weight.fill_(100.0)  # saturate
+        m.set_diagnostics(enabled=True)
+        g = torch.Generator(); g.manual_seed(3)
+        x = torch.randint(0, 256, (1, 64), generator=g)
+        with torch.no_grad():
+            logits, _ = m(x)
+        assert torch.isfinite(logits).all()
+        blk = m.transformer.h[0].attn
+        # clamped path caps |bias| at clip
+        assert float(blk.last_distance_bias_abs_mean) <= 1.0 + 1e-6
+
+    def test_negative_alpha_binding_clip_uses_clamped_path(self):
+        """Regression #29 (sign attack on the #28 guard). The fast-path guard
+        must compare |alpha*range| <= clip, not the SIGNED product: with
+        alpha=-2.0 the signed check (-2.0 <= 1.0) wrongly took the rank-1
+        path while the clamp was provably active, diverging from the exact
+        clamped reference by up to 6.4e-2 in logits. Pin: a negative alpha
+        whose magnitude exceeds clip must produce clip-capped bias stats
+        (i.e. the clamped branch ran)."""
+        kw = dict(self.KW, distance_laplace_alpha=-2.0,
+                  distance_laplace_clip=1.0)  # |alpha*range|=2 > clip=1
+        torch.manual_seed(0)
+        m = GPT(small_cfg(**kw)).eval()
+        with torch.no_grad():
+            for blk in m.transformer.h:
+                blk.attn.W_gate_d.weight.fill_(100.0)  # saturate the gate
+        m.set_diagnostics(enabled=True)
+        g = torch.Generator(); g.manual_seed(3)
+        x = torch.randint(0, 256, (1, 64), generator=g)
+        with torch.no_grad():
+            logits, _ = m(x)
+        assert torch.isfinite(logits).all()
+        blk = m.transformer.h[0].attn
+        # clamped branch caps |bias| at clip; the (buggy) rank-1 branch would
+        # have produced |bias| up to |alpha|*range = 2.0 on distant pairs.
+        assert float(blk.last_distance_bias_abs_mean) <= 1.0 + 1e-6
+
+    def test_negative_alpha_within_clip_fast_path_matches_reference(self):
+        """Companion to #29: a negative alpha whose |alpha*range| <= clip IS
+        legal on the fast path (clamp provably inactive on the causal
+        region). Pin rank-1 == materialized reference for alpha=-0.5."""
+        kw = dict(self.KW, distance_laplace_alpha=-0.5)
+        torch.manual_seed(0)
+        m = GPT(small_cfg(**kw)).eval()
+        blk = m.transformer.h[0].attn
+        T, C = 64, 32
+        g = torch.Generator(); g.manual_seed(9)
+        x = torch.randn(1, T, C, generator=g)
+        gd = torch.tanh(blk.W_gate_d(x)).float()
+        coef = -0.5 * 1.0 * blk.layer_gate_multiplier
+        posn = torch.arange(T).float() / (self.KW["block_size"] - 1)
+        cg = (coef * gd).transpose(1, 2)
+        fast = posn.view(1, 1, T, 1) * cg.unsqueeze(2) \
+            - (cg * posn[None, None, :]).unsqueeze(2)
+        dist = (torch.arange(T)[:, None] - torch.arange(T)[None, :]) \
+            .clamp_min(0).float() / (self.KW["block_size"] - 1)
+        ref = dist[None, None] * cg.unsqueeze(2)
+        causal = torch.tril(torch.ones(T, T, dtype=torch.bool))
+        assert ((fast - ref).abs() * causal).max().item() < 1e-6

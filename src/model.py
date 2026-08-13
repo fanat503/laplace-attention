@@ -576,27 +576,57 @@ class CausalSelfAttention(nn.Module):
             # unaffected bit-for-bit (FixedDataset always yields T==block_size),
             # so existing checkpoints stay valid; inference at shorter T is now
             # consistent with training semantics.
-            dist = (pos[:, None] - pos[None, :]).clamp_min(0).float() / float(max(1, self.block_size - 1))
-            key_gate = gate_d.transpose(1, 2).unsqueeze(2)  # (B,H,1,T_key)
-            dist_bias = (
-                self.distance_laplace_alpha
-                * self.distance_laplace_range
-                * layer_mult
-                * dist[None, None, :, :]
-                * key_gate
-            )
+            pos_n = pos.float() / float(max(1, self.block_size - 1))
+            coef = (self.distance_laplace_alpha
+                    * self.distance_laplace_range
+                    * layer_mult)
             clip_d = self.distance_laplace_clip * layer_mult
-            dist_bias = torch.clamp(
-                dist_bias,
-                min=-clip_d,
-                max=clip_d,
-            )
-            att = att + dist_bias.to(att.dtype)
-            with torch.no_grad():
-                self.last_distance_bias_mean = dist_bias.detach().float().mean()
-                self.last_distance_bias_abs_mean = dist_bias.detach().float().abs().mean()
+            # SPEED FIX #28 (V6 finding: HLA wall-clock 1.70x vs base on v5e;
+            # FLOPs say 1.075x - the gap is HBM traffic). The old path
+            # materialized dist_bias as a full (B,H,T,T) fp32 tensor, then a
+            # second (B,H,T,T) for clamp, then reduced TWO more (B,H,T,T)
+    # stats every TRAINING step: ~5 extra HBM passes x 12 layers.
+            # Observation: bias_ij = coef*(p_i - p_j)*g_j factorizes RANK-1:
+            #     bias = p_i * (coef*g_j)  -  (p_j * coef*g_j)
+            # i.e. one outer-product broadcast + one per-key row broadcast -
+            # XLA fuses both into the existing att tensor: ZERO new (B,H,T,T)
+            # buffers. Exactness: |pre-clip bias| <= alpha*range*lm <= clip*lm
+            # whenever alpha*range <= clip (audit E3 invariant; true for every
+            # shipped config: 0.5*1.0 <= 1.0), so the clamp is provably
+            # inactive on the causal region and the factorization is EXACT
+            # (j > i entries differ but are masked to -inf before softmax).
+            # Identity: gate_d = 0 => both terms exactly 0 (sterility intact).
+            # General configs where the clamp CAN bind keep the old exact
+            # clamped path below.
+            # FIX #29 (sign attack): the bound is on |bias|, so the guard must
+            # compare |alpha*range| to clip. The unsigned form let a NEGATIVE
+            # alpha (e.g. -2.0 <= 1.0) take the fast path while the clamp was
+            # provably ACTIVE (max |logits| divergence 6.4e-2 vs the exact
+            # clamped reference). Shipped configs (alpha=0.5>0) unaffected.
+            if abs(float(self.distance_laplace_alpha) * float(self.distance_laplace_range)) <= float(self.distance_laplace_clip):
+                cg = (coef * gate_d).transpose(1, 2)              # (B,H,T_key)
+                key_row = (cg * pos_n[None, None, :]).unsqueeze(2)  # (B,H,1,T)
+                att = att + pos_n.view(1, 1, T, 1).to(att.dtype) * cg.unsqueeze(2).to(att.dtype) \
+                          - key_row.to(att.dtype)
                 if self.capture_diagnostics:
-                    self.last_gate_d = gate_d.detach()
+                    with torch.no_grad():
+                        # exact cheap stats over the causal region from factors
+                        dist = (pos[:, None] - pos[None, :]).clamp_min(0).float() / float(max(1, self.block_size - 1))
+                        db = dist[None, None, :, :] * cg.unsqueeze(2)
+                        self.last_distance_bias_mean = db.mean()
+                        self.last_distance_bias_abs_mean = db.abs().mean()
+                        self.last_gate_d = gate_d.detach()
+            else:
+                dist = (pos[:, None] - pos[None, :]).clamp_min(0).float() / float(max(1, self.block_size - 1))
+                key_gate = gate_d.transpose(1, 2).unsqueeze(2)  # (B,H,1,T_key)
+                dist_bias = dist[None, None, :, :] * key_gate * coef
+                dist_bias = torch.clamp(dist_bias, min=-clip_d, max=clip_d)
+                att = att + dist_bias.to(att.dtype)
+                with torch.no_grad():
+                    self.last_distance_bias_mean = dist_bias.detach().float().mean()
+                    self.last_distance_bias_abs_mean = dist_bias.detach().float().abs().mean()
+                    if self.capture_diagnostics:
+                        self.last_gate_d = gate_d.detach()
         elif self.capture_diagnostics:
             with torch.no_grad():
                 zero = torch.zeros((), device=x.device)
