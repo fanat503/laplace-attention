@@ -4,15 +4,7 @@
 
 </div>
 
-Every attention head does two jobs with one set of vectors: retrieval and transmission. They interfere. HLA gives each job its own channel.
-
-This repository has:
-
-1. The mechanism - one modified attention equation ([`src/model.py`](src/model.py));
-2. A sterile comparison ([`docs/STERILITY.md`](docs/STERILITY.md));
-3. Theory: 9 theorems ([`docs/THEORY.md`](docs/THEORY.md));
-5. Every metric documented ([`docs/METRICS.md`](docs/METRICS.md)).
-
+Attention head does two jobs: retrieval and transmission. They interfere. HLA gives each job its own channel
 
 
 ## How to start
@@ -50,4 +42,4 @@ python scripts/make_ablation_configs.py \
 
 If you use this code, please cite it via [`CITATION.cff`](CITATION.cff).
 
-**Apache-2.0** · Independent research; replications and compute support welcome
+Apache-2.0. Independent research
