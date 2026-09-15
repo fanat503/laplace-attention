@@ -1,0 +1,309 @@
+{
+  "audit_date": "2026-07-01",
+  "scope": "HLA-v5 only",
+  "repo": {
+    "remote": "https://github.com/fanat503/Laplace-attention",
+    "commit": "12e5a0f99914e89810d169a9adb82baf64ad2bf1",
+    "last_commit_date": "2026-06-30 12:05:32 +0300",
+    "last_commit_subject": "Delete make_init.py"
+  },
+  "status": {
+    "overall": "fail",
+    "sterility": "fail",
+    "tests": "fail",
+    "environment": "fail",
+    "main_config_pair_validation": "pass",
+    "python_compile": "pass"
+  },
+  "repo_metrics": {
+    "tracked_files_hla_v5": 53,
+    "python_files": 31,
+    "script_files": 20,
+    "test_files": 3,
+    "config_json_files": 19
+  },
+  "checks": [
+    {
+      "name": "pytest",
+      "command": "python -m pytest HLA-v5/tests -q",
+      "status": "fail",
+      "summary": "3 collection errors; all fail on ModuleNotFoundError: No module named 'src'"
+    },
+    {
+      "name": "sterility_audit",
+      "command": "python HLA-v5/scripts/audit_sterility.py --root HLA-v5",
+      "status": "fail",
+      "summary": "Missing expected root files, src package, requirements files, pyproject, and docs"
+    },
+    {
+      "name": "environment_check",
+      "command": "python HLA-v5/scripts/check_environment.py --requirements HLA-v5/requirements_tpu.txt",
+      "status": "fail",
+      "summary": "Active Python is 3.13.5; script requires >=3.10,<3.12"
+    },
+    {
+      "name": "validate_800m_pair",
+      "command": "python HLA-v5/scripts/validate_configs.py --base HLA-v5/configs/800m_base_s42.json --hla HLA-v5/configs/800m_hla_s42.json",
+      "status": "pass",
+      "summary": "Main 800M base/HLA pair validated successfully"
+    },
+    {
+      "name": "compileall",
+      "command": "python -m compileall HLA-v5",
+      "status": "pass",
+      "summary": "All v5 Python files compiled without syntax errors"
+    }
+  ],
+  "findings": [
+    {
+      "id": "layout-src-scr-mismatch",
+      "severity": "high",
+      "summary": "The repository layout is inconsistent: code lives under scr/, while runtime code and tests import src.*",
+      "evidence": [
+        "HLA-v5/scr/train_xla.py:64",
+        "HLA-v5/scr/train_xla.py:65",
+        "HLA-v5/scr/train_xla.py:66",
+        "HLA-v5/scr/make_init.py:42",
+        "HLA-v5/tests/test_data.py:1",
+        "HLA-v5/tests/test_eval.py:1",
+        "HLA-v5/tests/test_make_init.py:1"
+      ]
+    },
+    {
+      "id": "stale-sterility-audit",
+      "severity": "high",
+      "summary": "audit_sterility.py targets an older repo layout and required file set",
+      "evidence": [
+        "HLA-v5/scripts/audit_sterility.py:18",
+        "HLA-v5/scripts/audit_sterility.py:99",
+        "HLA-v5/scripts/audit_sterility.py:112",
+        "HLA-v5/scripts/audit_sterility.py:121"
+      ]
+    },
+    {
+      "id": "invalid-200m-configs",
+      "severity": "high",
+      "summary": "The 200M config family cannot instantiate because n_embd is not divisible by n_head",
+      "evidence": [
+        "HLA-v5/configs/200m_base_s42.json:1",
+        "HLA-v5/configs/200m_hla_s42.json:1",
+        "HLA-v5/configs/configs200m_base_s42.json:1",
+        "HLA-v5/scr/model.py:430"
+      ]
+    },
+    {
+      "id": "config-doc-drift",
+      "severity": "medium",
+      "summary": "configs/README.md does not document distance_laplace_alpha even though the validator allows it",
+      "evidence": [
+        "HLA-v5/configs/README.md:8",
+        "HLA-v5/configs/README.md:14",
+        "HLA-v5/configs/README.md:15",
+        "HLA-v5/scripts/validate_configs.py:15",
+        "HLA-v5/scripts/validate_configs.py:16",
+        "HLA-v5/scripts/validate_configs.py:17"
+      ]
+    },
+    {
+      "id": "missing-packaging-and-pins",
+      "severity": "medium",
+      "summary": "HLA-v5 is missing the requirement files and pyproject that its own environment and sterility checks expect",
+      "evidence": [
+        "HLA-v5/scripts/audit_sterility.py:47",
+        "HLA-v5/scripts/audit_sterility.py:50"
+      ]
+    }
+  ],
+  "config_pair_status": [
+    {
+      "base": "200m_base_s42.json",
+      "hla": "200m_hla_s42.json",
+      "sterile_under_current_validator": false,
+      "illegal_differences": [
+        "model.use_distance_laplace",
+        "model.use_laplace"
+      ]
+    },
+    {
+      "base": "300m_base_s42.json",
+      "hla": "300m_hla_s42.json",
+      "sterile_under_current_validator": false,
+      "illegal_differences": [
+        "max_steps",
+        "model.use_distance_laplace",
+        "model.use_laplace"
+      ]
+    },
+    {
+      "base": "600m_base_15b_s42.json",
+      "hla": "600m_hla_15b_s42.json",
+      "sterile_under_current_validator": true,
+      "illegal_differences": []
+    },
+    {
+      "base": "700m_base_14b_s42.json",
+      "hla": "700m_hla_14b_s42.json",
+      "sterile_under_current_validator": true,
+      "illegal_differences": []
+    },
+    {
+      "base": "700m_base_14b_b2g16_s42.json",
+      "hla": "700m_hla_14b_b2g16_s42.json",
+      "sterile_under_current_validator": true,
+      "illegal_differences": []
+    },
+    {
+      "base": "700m_base_14b_b4g8_s42.json",
+      "hla": "700m_hla_14b_b4g8_s42.json",
+      "sterile_under_current_validator": true,
+      "illegal_differences": []
+    },
+    {
+      "base": "700m_base_14b_b8g4_s42.json",
+      "hla": "700m_hla_14b_b8g4_s42.json",
+      "sterile_under_current_validator": true,
+      "illegal_differences": []
+    },
+    {
+      "base": "800m_base_s42.json",
+      "hla": "800m_hla_s42.json",
+      "sterile_under_current_validator": true,
+      "illegal_differences": []
+    }
+  ],
+  "config_metrics": [
+    {
+      "config": "200m_base_s42.json",
+      "valid_model_shape": false,
+      "approx_parameter_count": null,
+      "tokens_per_update": 262144,
+      "total_tokens": 5242880000
+    },
+    {
+      "config": "200m_hla_s42.json",
+      "valid_model_shape": false,
+      "approx_parameter_count": null,
+      "tokens_per_update": 262144,
+      "total_tokens": 5242880000
+    },
+    {
+      "config": "300m_base_s42.json",
+      "valid_model_shape": true,
+      "approx_parameter_count": 328198784,
+      "tokens_per_update": 262144,
+      "total_tokens": 6553600000
+    },
+    {
+      "config": "300m_hla_s42.json",
+      "valid_model_shape": true,
+      "approx_parameter_count": 328198784,
+      "tokens_per_update": 262144,
+      "total_tokens": 6122110976
+    },
+    {
+      "config": "600m_base_15b_s42.json",
+      "valid_model_shape": true,
+      "approx_parameter_count": 581859328,
+      "tokens_per_update": 262144,
+      "total_tokens": 15000141824
+    },
+    {
+      "config": "600m_hla_15b_s42.json",
+      "valid_model_shape": true,
+      "approx_parameter_count": 581859328,
+      "tokens_per_update": 262144,
+      "total_tokens": 15000141824
+    },
+    {
+      "config": "700m_base_14b_s42.json",
+      "valid_model_shape": true,
+      "approx_parameter_count": 694112384,
+      "tokens_per_update": 262144,
+      "total_tokens": 14000062464
+    },
+    {
+      "config": "700m_hla_14b_s42.json",
+      "valid_model_shape": true,
+      "approx_parameter_count": 694112384,
+      "tokens_per_update": 262144,
+      "total_tokens": 14000062464
+    },
+    {
+      "config": "700m_base_14b_b2g16_s42.json",
+      "valid_model_shape": true,
+      "approx_parameter_count": 694112384,
+      "tokens_per_update": 262144,
+      "total_tokens": 14000062464
+    },
+    {
+      "config": "700m_hla_14b_b2g16_s42.json",
+      "valid_model_shape": true,
+      "approx_parameter_count": 694112384,
+      "tokens_per_update": 262144,
+      "total_tokens": 14000062464
+    },
+    {
+      "config": "700m_base_14b_b4g8_s42.json",
+      "valid_model_shape": true,
+      "approx_parameter_count": 694112384,
+      "tokens_per_update": 262144,
+      "total_tokens": 14000062464
+    },
+    {
+      "config": "700m_hla_14b_b4g8_s42.json",
+      "valid_model_shape": true,
+      "approx_parameter_count": 694112384,
+      "tokens_per_update": 262144,
+      "total_tokens": 14000062464
+    },
+    {
+      "config": "700m_base_14b_b8g4_s42.json",
+      "valid_model_shape": true,
+      "approx_parameter_count": 694112384,
+      "tokens_per_update": 262144,
+      "total_tokens": 14000062464
+    },
+    {
+      "config": "700m_hla_14b_b8g4_s42.json",
+      "valid_model_shape": true,
+      "approx_parameter_count": 694112384,
+      "tokens_per_update": 262144,
+      "total_tokens": 14000062464
+    },
+    {
+      "config": "800m_base_s42.json",
+      "valid_model_shape": true,
+      "approx_parameter_count": 816195840,
+      "tokens_per_update": 262144,
+      "total_tokens": 21000093696
+    },
+    {
+      "config": "800m_hla_s42.json",
+      "valid_model_shape": true,
+      "approx_parameter_count": 816195840,
+      "tokens_per_update": 262144,
+      "total_tokens": 21000093696
+    },
+    {
+      "config": "pilot_hla_s42.json",
+      "valid_model_shape": true,
+      "approx_parameter_count": 816195840,
+      "tokens_per_update": 262144,
+      "total_tokens": 262144000
+    },
+    {
+      "config": "smoke_hla_s42.json",
+      "valid_model_shape": true,
+      "approx_parameter_count": 39752256,
+      "tokens_per_update": 2048,
+      "total_tokens": 20480
+    },
+    {
+      "config": "configs200m_base_s42.json",
+      "valid_model_shape": false,
+      "approx_parameter_count": null,
+      "tokens_per_update": 262144,
+      "total_tokens": 5242880000
+    }
+  ]
+}
