@@ -1,0 +1,2532 @@
+diff --git a/configs/700m_base_14b_sdpa_s42.json b/configs/700m_base_14b_sdpa_s42.json
+new file mode 100644
+index 0000000..9bcd723
+--- /dev/null
++++ b/configs/700m_base_14b_sdpa_s42.json
+@@ -0,0 +1,77 @@
++{
++  "seed": 42,
++  "variant": "base_700m_parameter_matched_ablated_14b_ldg_distlap_rope",
++  "run_name": "700m_base_14b_sdpa_s42",
++  "save_dir": "runs/700m_base_14b_sdpa_s42",
++  "train_path": "data/train_fixed_tokens.bin",
++  "val_path": "data/val_fixed_tokens.bin",
++  "init_ckpt": "data/init_700m14b_base_s42.pt",
++  "init_strict": true,
++  "check_init_hla_identity": true,
++  "expected_vocab_size": 50257,
++  "validate_dataset_full": false,
++  "batch_size_per_device": 1,
++  "eval_batch_size_per_device": 1,
++  "grad_accum": 32,
++  "max_steps": 53406,
++  "warmup": 1500,
++  "lr": 0.00026,
++  "min_lr": 2.6e-05,
++  "weight_decay": 0.1,
++  "betas": [
++    0.9,
++    0.95
++  ],
++  "adam_eps": 1e-08,
++  "grad_clip": 1.0,
++  "log_every": 100,
++  "val_every": 500,
++  "svd_every": 2000,
++  "val_batches": 64,
++  "resume_every": 250,
++  "save_every": 5000,
++  "keep_last_checkpoints": 4,
++  "min_free_gb": 20,
++  "num_cores": 8,
++  "xmp_start_method": "fork",
++  "num_workers": 2,
++  "allow_multiple_epochs": false,
++  "fail_on_nonfinite_val": true,
++  "xla_autocast": false,
++  "model": {
++    "block_size": 1024,
++    "vocab_size": 50257,
++    "n_layer": 24,
++    "n_head": 16,
++    "n_embd": 1408,
++    "dropout": 0.0,
++    "bias": false,
++    "phase_mult": 0.0,
++    "use_laplace": true,
++    "laplace_alpha": 0.0,
++    "laplace_range_k": 0.5,
++    "laplace_range_v": 0.3,
++    "beta_k": 0.5,
++    "beta_v": 0.35,
++    "gradient_checkpointing": true,
++    "baseline_type": "parameter_matched_ablated_700m14b_ldg_distlap_rope",
++    "padded_vocab_size": 50304,
++    "fused_swiglu": true,
++    "ffn_hidden_multiple_of": 64,
++    "attention_backend": "sdpa",
++    "k_log_clip": 1.5,
++    "v_log_clip": 1.0,
++    "layer_dependent_gate": true,
++    "use_distance_laplace": true,
++    "distance_laplace_alpha": 0.0,
++    "distance_laplace_range": 1.0,
++    "distance_laplace_clip": 1.0,
++    "use_rope": true,
++    "rope_theta": 10000.0,
++    "use_wpe": false
++  },
++  "dataloader_prefetch_factor": 4,
++  "xla_loader_prefetch_size": 8,
++  "xla_device_prefetch_size": 4,
++  "_doc": "SPEED/SCALE config (#30): sdpa backend. "
++}
+\ No newline at end of file
+diff --git a/configs/700m_hla_14b_fold_s42.json b/configs/700m_hla_14b_fold_s42.json
+new file mode 100644
+index 0000000..0562838
+--- /dev/null
++++ b/configs/700m_hla_14b_fold_s42.json
+@@ -0,0 +1,77 @@
++{
++  "seed": 42,
++  "variant": "hla_v4_700m_safe_scale_14b_ldg_distlap_rope",
++  "run_name": "700m_hla_14b_fold_s42",
++  "save_dir": "runs/700m_hla_14b_fold_s42",
++  "train_path": "data/train_fixed_tokens.bin",
++  "val_path": "data/val_fixed_tokens.bin",
++  "init_ckpt": "data/init_700m14b_hla_s42.pt",
++  "init_strict": true,
++  "check_init_hla_identity": true,
++  "expected_vocab_size": 50257,
++  "validate_dataset_full": false,
++  "batch_size_per_device": 1,
++  "eval_batch_size_per_device": 1,
++  "grad_accum": 32,
++  "max_steps": 53406,
++  "warmup": 1500,
++  "lr": 0.00026,
++  "min_lr": 2.6e-05,
++  "weight_decay": 0.1,
++  "betas": [
++    0.9,
++    0.95
++  ],
++  "adam_eps": 1e-08,
++  "grad_clip": 1.0,
++  "log_every": 100,
++  "val_every": 500,
++  "svd_every": 2000,
++  "val_batches": 64,
++  "resume_every": 250,
++  "save_every": 5000,
++  "keep_last_checkpoints": 4,
++  "min_free_gb": 20,
++  "num_cores": 8,
++  "xmp_start_method": "fork",
++  "num_workers": 2,
++  "allow_multiple_epochs": false,
++  "fail_on_nonfinite_val": true,
++  "xla_autocast": false,
++  "model": {
++    "block_size": 1024,
++    "vocab_size": 50257,
++    "n_layer": 24,
++    "n_head": 16,
++    "n_embd": 1408,
++    "dropout": 0.0,
++    "bias": false,
++    "phase_mult": 0.15,
++    "use_laplace": true,
++    "laplace_alpha": 1.0,
++    "laplace_range_k": 0.5,
++    "laplace_range_v": 0.3,
++    "beta_k": 0.5,
++    "beta_v": 0.35,
++    "gradient_checkpointing": true,
++    "baseline_type": "hla_v4_safe_scale_700m14b_ldg_distlap_rope",
++    "padded_vocab_size": 50304,
++    "fused_swiglu": true,
++    "ffn_hidden_multiple_of": 64,
++    "attention_backend": "sdpa_fold",
++    "k_log_clip": 1.5,
++    "v_log_clip": 1.0,
++    "layer_dependent_gate": true,
++    "use_distance_laplace": true,
++    "distance_laplace_alpha": 0.25,
++    "distance_laplace_range": 1.0,
++    "distance_laplace_clip": 1.0,
++    "use_rope": true,
++    "rope_theta": 10000.0,
++    "use_wpe": false
++  },
++  "dataloader_prefetch_factor": 4,
++  "xla_loader_prefetch_size": 8,
++  "xla_device_prefetch_size": 4,
++  "_doc": "SPEED/SCALE config (#30): sdpa_fold backend. "
++}
+\ No newline at end of file
+diff --git a/configs/700m_hla_14b_pallas_s42.json b/configs/700m_hla_14b_pallas_s42.json
+new file mode 100644
+index 0000000..e9fe501
+--- /dev/null
++++ b/configs/700m_hla_14b_pallas_s42.json
+@@ -0,0 +1,77 @@
++{
++  "seed": 42,
++  "variant": "hla_v4_700m_safe_scale_14b_ldg_distlap_rope",
++  "run_name": "700m_hla_14b_pallas_s42",
++  "save_dir": "runs/700m_hla_14b_pallas_s42",
++  "train_path": "data/train_fixed_tokens.bin",
++  "val_path": "data/val_fixed_tokens.bin",
++  "init_ckpt": "data/init_700m14b_hla_s42.pt",
++  "init_strict": true,
++  "check_init_hla_identity": true,
++  "expected_vocab_size": 50257,
++  "validate_dataset_full": false,
++  "batch_size_per_device": 1,
++  "eval_batch_size_per_device": 1,
++  "grad_accum": 32,
++  "max_steps": 53406,
++  "warmup": 1500,
++  "lr": 0.00026,
++  "min_lr": 2.6e-05,
++  "weight_decay": 0.1,
++  "betas": [
++    0.9,
++    0.95
++  ],
++  "adam_eps": 1e-08,
++  "grad_clip": 1.0,
++  "log_every": 100,
++  "val_every": 500,
++  "svd_every": 2000,
++  "val_batches": 64,
++  "resume_every": 250,
++  "save_every": 5000,
++  "keep_last_checkpoints": 4,
++  "min_free_gb": 20,
++  "num_cores": 8,
++  "xmp_start_method": "fork",
++  "num_workers": 2,
++  "allow_multiple_epochs": false,
++  "fail_on_nonfinite_val": true,
++  "xla_autocast": false,
++  "model": {
++    "block_size": 1024,
++    "vocab_size": 50257,
++    "n_layer": 24,
++    "n_head": 16,
++    "n_embd": 1408,
++    "dropout": 0.0,
++    "bias": false,
++    "phase_mult": 0.15,
++    "use_laplace": true,
++    "laplace_alpha": 1.0,
++    "laplace_range_k": 0.5,
++    "laplace_range_v": 0.3,
++    "beta_k": 0.5,
++    "beta_v": 0.35,
++    "gradient_checkpointing": true,
++    "baseline_type": "hla_v4_safe_scale_700m14b_ldg_distlap_rope",
++    "padded_vocab_size": 50304,
++    "fused_swiglu": true,
++    "ffn_hidden_multiple_of": 64,
++    "attention_backend": "pallas",
++    "k_log_clip": 1.5,
++    "v_log_clip": 1.0,
++    "layer_dependent_gate": true,
++    "use_distance_laplace": true,
++    "distance_laplace_alpha": 0.25,
++    "distance_laplace_range": 1.0,
++    "distance_laplace_clip": 1.0,
++    "use_rope": true,
++    "rope_theta": 10000.0,
++    "use_wpe": false
++  },
++  "dataloader_prefetch_factor": 4,
++  "xla_loader_prefetch_size": 8,
++  "xla_device_prefetch_size": 4,
++  "_doc": "SPEED BENCHMARK config (#30b): HLA with attention_backend=pallas - same fold math, kernel = torch_xla Pallas flash_attention (TPU only). Fails loud without torch_xla. Port recipe for other stacks: augment q/k with fold dims, call any flash kernel with explicit sm_scale=1/sqrt(hs)."
++}
+\ No newline at end of file
+diff --git a/configs/gpu_200m_base_flash_s42.json b/configs/gpu_200m_base_flash_s42.json
+new file mode 100644
+index 0000000..ae48ba4
+--- /dev/null
++++ b/configs/gpu_200m_base_flash_s42.json
+@@ -0,0 +1,76 @@
++{
++  "_doc": "GPU SPEED config: base via F.scaled_dot_product_attention - on CUDA this dispatches to FlashAttention-2 (Triton/CUDA-class kernel). Train this as the speed-base on GPU.",
++  "seed": 42,
++  "save_dir": "/kaggle/working/runs/gpu_200m_base_flash_s42",
++  "run_name": "gpu_200m_base_flash_s42",
++  "train_path": "/kaggle/input/hla-c4-tokens/train_fixed_tokens.bin",
++  "val_path": "/kaggle/input/hla-c4-tokens/val_fixed_tokens.bin",
++  "init_ckpt": "/kaggle/working/inits/init_200m_s42_base.pt",
++  "init_strict": true,
++  "check_init_hla_identity": true,
++  "expected_vocab_size": 50257,
++  "batch_size_per_device": 1,
++  "eval_batch_size_per_device": 2,
++  "grad_accum": 16,
++  "num_workers": 0,
++  "dataloader_prefetch_factor": 4,
++  "max_steps": 15000,
++  "warmup": 750,
++  "grad_clip": 1.0,
++  "lr": 0.0006,
++  "min_lr": 6e-05,
++  "weight_decay": 0.1,
++  "betas": [
++    0.9,
++    0.95
++  ],
++  "adam_eps": 1e-08,
++  "log_every": 50,
++  "val_every": 500,
++  "svd_every": 2500,
++  "val_batches": 100,
++  "resume_every": 500,
++  "save_every": 0,
++  "keep_last_checkpoints": 2,
++  "min_free_gb": 5.0,
++  "num_cores": 8,
++  "xla_loader_prefetch_size": 8,
++  "xla_device_prefetch_size": 4,
++  "validate_dataset_full": false,
++  "fail_on_nonfinite_val": true,
++  "allow_multiple_epochs": false,
++  "model": {
++    "block_size": 2048,
++    "vocab_size": 50257,
++    "n_layer": 12,
++    "n_head": 16,
++    "n_embd": 1024,
++    "dropout": 0.0,
++    "bias": false,
++    "gradient_checkpointing": false,
++    "fused_swiglu": true,
++    "use_rope": true,
++    "phase_mult": 0.0,
++    "use_laplace": true,
++    "laplace_alpha": 0.0,
++    "laplace_range_k": 0.8,
++    "laplace_range_v": 0.5,
++    "beta_k": 0.7,
++    "beta_v": 0.5,
++    "k_log_clip": 2.0,
++    "v_log_clip": 1.5,
++    "layer_dependent_gate": false,
++    "use_distance_laplace": true,
++    "distance_laplace_alpha": 0.0,
++    "distance_laplace_range": 1.0,
++    "distance_laplace_clip": 1.0,
++    "use_wpe": false,
++    "use_salience_bias": true,
++    "salience_alpha": 0.0,
++    "salience_range": 2.0,
++    "salience_clip": 3.0,
++    "baseline_type": "base_pm_ablated_v2",
++    "attention_backend": "sdpa"
++  },
++  "variant": "base_pm_ablated_v2"
++}
+\ No newline at end of file
+diff --git a/configs/gpu_200m_hla_flash_fold_s42.json b/configs/gpu_200m_hla_flash_fold_s42.json
+new file mode 100644
+index 0000000..e6fe1ca
+--- /dev/null
++++ b/configs/gpu_200m_hla_flash_fold_s42.json
+@@ -0,0 +1,76 @@
++{
++  "_doc": "GPU SPEED config: HLA with rank-1 biases folded into qk (finding #30) -> SDPA dispatches to FlashAttention-2 on CUDA. No custom kernel needed: the fold makes ANY flash kernel legal. Port recipe in docs/SPEED_BACKENDS.md.",
++  "seed": 42,
++  "save_dir": "/kaggle/working/runs/gpu_200m_hla_flash_fold_s42",
++  "run_name": "gpu_200m_hla_flash_fold_s42",
++  "train_path": "/kaggle/input/hla-c4-tokens/train_fixed_tokens.bin",
++  "val_path": "/kaggle/input/hla-c4-tokens/val_fixed_tokens.bin",
++  "init_ckpt": "/kaggle/working/inits/init_200m_s42_hla.pt",
++  "init_strict": true,
++  "check_init_hla_identity": true,
++  "expected_vocab_size": 50257,
++  "batch_size_per_device": 1,
++  "eval_batch_size_per_device": 2,
++  "grad_accum": 16,
++  "num_workers": 0,
++  "dataloader_prefetch_factor": 4,
++  "max_steps": 15000,
++  "warmup": 750,
++  "grad_clip": 1.0,
++  "lr": 0.0006,
++  "min_lr": 6e-05,
++  "weight_decay": 0.1,
++  "betas": [
++    0.9,
++    0.95
++  ],
++  "adam_eps": 1e-08,
++  "log_every": 50,
++  "val_every": 500,
++  "svd_every": 2500,
++  "val_batches": 100,
++  "resume_every": 500,
++  "save_every": 0,
++  "keep_last_checkpoints": 2,
++  "min_free_gb": 5.0,
++  "num_cores": 8,
++  "xla_loader_prefetch_size": 8,
++  "xla_device_prefetch_size": 4,
++  "validate_dataset_full": false,
++  "fail_on_nonfinite_val": true,
++  "allow_multiple_epochs": false,
++  "model": {
++    "block_size": 2048,
++    "vocab_size": 50257,
++    "n_layer": 12,
++    "n_head": 16,
++    "n_embd": 1024,
++    "dropout": 0.0,
++    "bias": false,
++    "gradient_checkpointing": false,
++    "fused_swiglu": true,
++    "use_rope": true,
++    "phase_mult": 0.15,
++    "use_laplace": true,
++    "laplace_alpha": 1.0,
++    "laplace_range_k": 0.8,
++    "laplace_range_v": 0.5,
++    "beta_k": 0.7,
++    "beta_v": 0.5,
++    "k_log_clip": 2.0,
++    "v_log_clip": 1.5,
++    "layer_dependent_gate": false,
++    "use_distance_laplace": true,
++    "distance_laplace_alpha": 0.5,
++    "distance_laplace_range": 1.0,
++    "distance_laplace_clip": 1.0,
++    "use_wpe": false,
++    "use_salience_bias": true,
++    "salience_alpha": 1.0,
++    "salience_range": 2.0,
++    "salience_clip": 3.0,
++    "baseline_type": "hla_v2_aggressive_gates_salience",
++    "attention_backend": "sdpa_fold"
++  },
++  "variant": "hla_v2_aggressive_gates_salience"
++}
+\ No newline at end of file
+diff --git a/configs/gpu_700m_base_flash_s42.json b/configs/gpu_700m_base_flash_s42.json
+new file mode 100644
+index 0000000..ab0d71b
+--- /dev/null
++++ b/configs/gpu_700m_base_flash_s42.json
+@@ -0,0 +1,77 @@
++{
++  "seed": 42,
++  "variant": "base_700m_parameter_matched_ablated_14b_ldg_distlap_rope",
++  "run_name": "gpu_700m_base_flash_s42",
++  "save_dir": "runs/gpu_700m_base_flash_s42",
++  "train_path": "data/train_fixed_tokens.bin",
++  "val_path": "data/val_fixed_tokens.bin",
++  "init_ckpt": "data/init_700m14b_base_s42.pt",
++  "init_strict": true,
++  "check_init_hla_identity": true,
++  "expected_vocab_size": 50257,
++  "validate_dataset_full": false,
++  "batch_size_per_device": 1,
++  "eval_batch_size_per_device": 1,
++  "grad_accum": 32,
++  "max_steps": 53406,
++  "warmup": 1500,
++  "lr": 0.00026,
++  "min_lr": 2.6e-05,
++  "weight_decay": 0.1,
++  "betas": [
++    0.9,
++    0.95
++  ],
++  "adam_eps": 1e-08,
++  "grad_clip": 1.0,
++  "log_every": 100,
++  "val_every": 500,
++  "svd_every": 2000,
++  "val_batches": 64,
++  "resume_every": 250,
++  "save_every": 5000,
++  "keep_last_checkpoints": 4,
++  "min_free_gb": 20,
++  "num_cores": 8,
++  "xmp_start_method": "fork",
++  "num_workers": 2,
++  "allow_multiple_epochs": false,
++  "fail_on_nonfinite_val": true,
++  "xla_autocast": false,
++  "model": {
++    "block_size": 1024,
++    "vocab_size": 50257,
++    "n_layer": 24,
++    "n_head": 16,
++    "n_embd": 1408,
++    "dropout": 0.0,
++    "bias": false,
++    "phase_mult": 0.0,
++    "use_laplace": true,
++    "laplace_alpha": 0.0,
++    "laplace_range_k": 0.5,
++    "laplace_range_v": 0.3,
++    "beta_k": 0.5,
++    "beta_v": 0.35,
++    "gradient_checkpointing": true,
++    "baseline_type": "parameter_matched_ablated_700m14b_ldg_distlap_rope",
++    "padded_vocab_size": 50304,
++    "fused_swiglu": true,
++    "ffn_hidden_multiple_of": 64,
++    "attention_backend": "sdpa",
++    "k_log_clip": 1.5,
++    "v_log_clip": 1.0,
++    "layer_dependent_gate": true,
++    "use_distance_laplace": true,
++    "distance_laplace_alpha": 0.0,
++    "distance_laplace_range": 1.0,
++    "distance_laplace_clip": 1.0,
++    "use_rope": true,
++    "rope_theta": 10000.0,
++    "use_wpe": false
++  },
++  "dataloader_prefetch_factor": 4,
++  "xla_loader_prefetch_size": 8,
++  "xla_device_prefetch_size": 4,
++  "_doc": "GPU variant: SPEED/SCALE config (#30): sdpa backend. "
++}
+\ No newline at end of file
+diff --git a/configs/gpu_700m_hla_flash_fold_s42.json b/configs/gpu_700m_hla_flash_fold_s42.json
+new file mode 100644
+index 0000000..febfdb7
+--- /dev/null
++++ b/configs/gpu_700m_hla_flash_fold_s42.json
+@@ -0,0 +1,77 @@
++{
++  "seed": 42,
++  "variant": "hla_v4_700m_safe_scale_14b_ldg_distlap_rope",
++  "run_name": "gpu_700m_hla_flash_fold_s42",
++  "save_dir": "runs/gpu_700m_hla_flash_fold_s42",
++  "train_path": "data/train_fixed_tokens.bin",
++  "val_path": "data/val_fixed_tokens.bin",
++  "init_ckpt": "data/init_700m14b_hla_s42.pt",
++  "init_strict": true,
++  "check_init_hla_identity": true,
++  "expected_vocab_size": 50257,
++  "validate_dataset_full": false,
++  "batch_size_per_device": 1,
++  "eval_batch_size_per_device": 1,
++  "grad_accum": 32,
++  "max_steps": 53406,
++  "warmup": 1500,
++  "lr": 0.00026,
++  "min_lr": 2.6e-05,
++  "weight_decay": 0.1,
++  "betas": [
++    0.9,
++    0.95
++  ],
++  "adam_eps": 1e-08,
++  "grad_clip": 1.0,
++  "log_every": 100,
++  "val_every": 500,
++  "svd_every": 2000,
++  "val_batches": 64,
++  "resume_every": 250,
++  "save_every": 5000,
++  "keep_last_checkpoints": 4,
++  "min_free_gb": 20,
++  "num_cores": 8,
++  "xmp_start_method": "fork",
++  "num_workers": 2,
++  "allow_multiple_epochs": false,
++  "fail_on_nonfinite_val": true,
++  "xla_autocast": false,
++  "model": {
++    "block_size": 1024,
++    "vocab_size": 50257,
++    "n_layer": 24,
++    "n_head": 16,
++    "n_embd": 1408,
++    "dropout": 0.0,
++    "bias": false,
++    "phase_mult": 0.15,
++    "use_laplace": true,
++    "laplace_alpha": 1.0,
++    "laplace_range_k": 0.5,
++    "laplace_range_v": 0.3,
++    "beta_k": 0.5,
++    "beta_v": 0.35,
++    "gradient_checkpointing": true,
++    "baseline_type": "hla_v4_safe_scale_700m14b_ldg_distlap_rope",
++    "padded_vocab_size": 50304,
++    "fused_swiglu": true,
++    "ffn_hidden_multiple_of": 64,
++    "attention_backend": "sdpa_fold",
++    "k_log_clip": 1.5,
++    "v_log_clip": 1.0,
++    "layer_dependent_gate": true,
++    "use_distance_laplace": true,
++    "distance_laplace_alpha": 0.25,
++    "distance_laplace_range": 1.0,
++    "distance_laplace_clip": 1.0,
++    "use_rope": true,
++    "rope_theta": 10000.0,
++    "use_wpe": false
++  },
++  "dataloader_prefetch_factor": 4,
++  "xla_loader_prefetch_size": 8,
++  "xla_device_prefetch_size": 4,
++  "_doc": "GPU variant: SPEED/SCALE config (#30): sdpa_fold backend. "
++}
+\ No newline at end of file
+diff --git a/configs/gpu_mini_124m_base_flash_s42.json b/configs/gpu_mini_124m_base_flash_s42.json
+new file mode 100644
+index 0000000..160aed1
+--- /dev/null
++++ b/configs/gpu_mini_124m_base_flash_s42.json
+@@ -0,0 +1,76 @@
++{
++  "_doc": "MINI 124M-class (768/12/12, total 131.3M, non-emb 92.7M; gpt2-small class) base, A100: sdpa=Flash-\u044f\u0434\u0440\u043e. \u0414\u0435\u0448\u0451\u0432\u044b\u0439 smoke backend'\u0430. \u041d\u0415 \u0434\u043b\u044f \u043d\u0430\u0443\u0447\u043d\u044b\u0445 \u043a\u043b\u0435\u0439\u043c\u043e\u0432. 300 \u0448\u0430\u0433\u043e\u0432.",
++  "seed": 42,
++  "save_dir": "runs/gpu_mini_124m_base_flash_s42",
++  "run_name": "gpu_mini_124m_base_flash_s42",
++  "train_path": "data/train_fixed_tokens.bin",
++  "val_path": "data/val_fixed_tokens.bin",
++  "init_ckpt": "/kaggle/working/inits/init_200m_s42_base.pt",
++  "init_strict": true,
++  "check_init_hla_identity": true,
++  "expected_vocab_size": 50257,
++  "batch_size_per_device": 1,
++  "eval_batch_size_per_device": 2,
++  "grad_accum": 16,
++  "num_workers": 0,
++  "dataloader_prefetch_factor": 4,
++  "max_steps": 300,
++  "warmup": 30,
++  "grad_clip": 1.0,
++  "lr": 0.0006,
++  "min_lr": 6e-05,
++  "weight_decay": 0.1,
++  "betas": [
++    0.9,
++    0.95
++  ],
++  "adam_eps": 1e-08,
++  "log_every": 50,
++  "val_every": 100,
++  "svd_every": 2500,
++  "val_batches": 100,
++  "resume_every": 0,
++  "save_every": 0,
++  "keep_last_checkpoints": 2,
++  "min_free_gb": 5.0,
++  "num_cores": 8,
++  "xla_loader_prefetch_size": 8,
++  "xla_device_prefetch_size": 4,
++  "validate_dataset_full": false,
++  "fail_on_nonfinite_val": true,
++  "allow_multiple_epochs": false,
++  "model": {
++    "block_size": 2048,
++    "vocab_size": 50257,
++    "n_layer": 12,
++    "n_head": 12,
++    "n_embd": 768,
++    "dropout": 0.0,
++    "bias": false,
++    "gradient_checkpointing": false,
++    "fused_swiglu": true,
++    "use_rope": true,
++    "phase_mult": 0.0,
++    "use_laplace": true,
++    "laplace_alpha": 0.0,
++    "laplace_range_k": 0.8,
++    "laplace_range_v": 0.5,
++    "beta_k": 0.7,
++    "beta_v": 0.5,
++    "k_log_clip": 2.0,
++    "v_log_clip": 1.5,
++    "layer_dependent_gate": false,
++    "use_distance_laplace": true,
++    "distance_laplace_alpha": 0.0,
++    "distance_laplace_range": 1.0,
++    "distance_laplace_clip": 1.0,
++    "use_wpe": false,
++    "use_salience_bias": true,
++    "salience_alpha": 0.0,
++    "salience_range": 2.0,
++    "salience_clip": 3.0,
++    "baseline_type": "base_pm_ablated_v2",
++    "attention_backend": "sdpa"
++  },
++  "variant": "base_pm_ablated_v2"
++}
+\ No newline at end of file
+diff --git a/configs/gpu_mini_124m_hla_flash_fold_s42.json b/configs/gpu_mini_124m_hla_flash_fold_s42.json
+new file mode 100644
+index 0000000..0ee402e
+--- /dev/null
++++ b/configs/gpu_mini_124m_hla_flash_fold_s42.json
+@@ -0,0 +1,76 @@
++{
++  "_doc": "MINI 124M-class (768/12/12, total 131.3M, non-emb 92.7M; gpt2-small class) HLA, A100: fold \u0432 flash. \u0414\u0435\u0448\u0451\u0432\u044b\u0439 smoke backend'\u0430. \u041d\u0415 \u0434\u043b\u044f \u043d\u0430\u0443\u0447\u043d\u044b\u0445 \u043a\u043b\u0435\u0439\u043c\u043e\u0432. 300 \u0448\u0430\u0433\u043e\u0432.",
++  "seed": 42,
++  "save_dir": "runs/gpu_mini_124m_hla_flash_fold_s42",
++  "run_name": "gpu_mini_124m_hla_flash_fold_s42",
++  "train_path": "data/train_fixed_tokens.bin",
++  "val_path": "data/val_fixed_tokens.bin",
++  "init_ckpt": "/kaggle/working/inits/init_200m_s42_hla.pt",
++  "init_strict": true,
++  "check_init_hla_identity": true,
++  "expected_vocab_size": 50257,
++  "batch_size_per_device": 1,
++  "eval_batch_size_per_device": 2,
++  "grad_accum": 16,
++  "num_workers": 0,
++  "dataloader_prefetch_factor": 4,
++  "max_steps": 300,
++  "warmup": 30,
++  "grad_clip": 1.0,
++  "lr": 0.0006,
++  "min_lr": 6e-05,
++  "weight_decay": 0.1,
++  "betas": [
++    0.9,
++    0.95
++  ],
++  "adam_eps": 1e-08,
++  "log_every": 50,
++  "val_every": 100,
++  "svd_every": 2500,
++  "val_batches": 100,
++  "resume_every": 0,
++  "save_every": 0,
++  "keep_last_checkpoints": 2,
++  "min_free_gb": 5.0,
++  "num_cores": 8,
++  "xla_loader_prefetch_size": 8,
++  "xla_device_prefetch_size": 4,
++  "validate_dataset_full": false,
++  "fail_on_nonfinite_val": true,
++  "allow_multiple_epochs": false,
++  "model": {
++    "block_size": 2048,
++    "vocab_size": 50257,
++    "n_layer": 12,
++    "n_head": 12,
++    "n_embd": 768,
++    "dropout": 0.0,
++    "bias": false,
++    "gradient_checkpointing": false,
++    "fused_swiglu": true,
++    "use_rope": true,
++    "phase_mult": 0.15,
++    "use_laplace": true,
++    "laplace_alpha": 1.0,
++    "laplace_range_k": 0.8,
++    "laplace_range_v": 0.5,
++    "beta_k": 0.7,
++    "beta_v": 0.5,
++    "k_log_clip": 2.0,
++    "v_log_clip": 1.5,
++    "layer_dependent_gate": false,
++    "use_distance_laplace": true,
++    "distance_laplace_alpha": 0.5,
++    "distance_laplace_range": 1.0,
++    "distance_laplace_clip": 1.0,
++    "use_wpe": false,
++    "use_salience_bias": true,
++    "salience_alpha": 1.0,
++    "salience_range": 2.0,
++    "salience_clip": 3.0,
++    "baseline_type": "hla_v2_aggressive_gates_salience",
++    "attention_backend": "sdpa_fold"
++  },
++  "variant": "hla_v2_aggressive_gates_salience"
++}
+\ No newline at end of file
+diff --git a/configs/kaggle_200m_base_speed_sdpa_s42.json b/configs/kaggle_200m_base_speed_sdpa_s42.json
+new file mode 100644
+index 0000000..0a4895c
+--- /dev/null
++++ b/configs/kaggle_200m_base_speed_sdpa_s42.json
+@@ -0,0 +1,76 @@
++{
++  "_doc": "SPEED BENCHMARK config (#30): base with attention_backend=sdpa. NOT for the frozen science pair (V7/V8 ran manual). Use for wall-clock speed table only.",
++  "seed": 42,
++  "save_dir": "/kaggle/working/runs/kaggle_200m_base_speed_sdpa_s42",
++  "run_name": "kaggle_200m_base_speed_sdpa_s42",
++  "train_path": "/kaggle/input/hla-c4-tokens/train_fixed_tokens.bin",
++  "val_path": "/kaggle/input/hla-c4-tokens/val_fixed_tokens.bin",
++  "init_ckpt": "/kaggle/working/inits/init_200m_s42_base.pt",
++  "init_strict": true,
++  "check_init_hla_identity": true,
++  "expected_vocab_size": 50257,
++  "batch_size_per_device": 1,
++  "eval_batch_size_per_device": 2,
++  "grad_accum": 16,
++  "num_workers": 0,
++  "dataloader_prefetch_factor": 4,
++  "max_steps": 15000,
++  "warmup": 750,
++  "grad_clip": 1.0,
++  "lr": 0.0006,
++  "min_lr": 6e-05,
++  "weight_decay": 0.1,
++  "betas": [
++    0.9,
++    0.95
++  ],
++  "adam_eps": 1e-08,
++  "log_every": 50,
++  "val_every": 500,
++  "svd_every": 2500,
++  "val_batches": 100,
++  "resume_every": 500,
++  "save_every": 0,
++  "keep_last_checkpoints": 2,
++  "min_free_gb": 5.0,
++  "num_cores": 8,
++  "xla_loader_prefetch_size": 8,
++  "xla_device_prefetch_size": 4,
++  "validate_dataset_full": false,
++  "fail_on_nonfinite_val": true,
++  "allow_multiple_epochs": false,
++  "model": {
++    "block_size": 2048,
++    "vocab_size": 50257,
++    "n_layer": 12,
++    "n_head": 16,
++    "n_embd": 1024,
++    "dropout": 0.0,
++    "bias": false,
++    "gradient_checkpointing": false,
++    "fused_swiglu": true,
++    "use_rope": true,
++    "phase_mult": 0.0,
++    "use_laplace": true,
++    "laplace_alpha": 0.0,
++    "laplace_range_k": 0.8,
++    "laplace_range_v": 0.5,
++    "beta_k": 0.7,
++    "beta_v": 0.5,
++    "k_log_clip": 2.0,
++    "v_log_clip": 1.5,
++    "layer_dependent_gate": false,
++    "use_distance_laplace": true,
++    "distance_laplace_alpha": 0.0,
++    "distance_laplace_range": 1.0,
++    "distance_laplace_clip": 1.0,
++    "use_wpe": false,
++    "use_salience_bias": true,
++    "salience_alpha": 0.0,
++    "salience_range": 2.0,
++    "salience_clip": 3.0,
++    "baseline_type": "base_pm_ablated_v2",
++    "attention_backend": "sdpa"
++  },
++  "variant": "base_pm_ablated_v2"
++}
+\ No newline at end of file
+diff --git a/configs/kaggle_200m_hla_speed_fold_s42.json b/configs/kaggle_200m_hla_speed_fold_s42.json
+new file mode 100644
+index 0000000..6da7dbd
+--- /dev/null
++++ b/configs/kaggle_200m_hla_speed_fold_s42.json
+@@ -0,0 +1,76 @@
++{
++  "_doc": "SPEED BENCHMARK config (#30): HLA with attention_backend=sdpa_fold - rank-1 distance + per-key salience folded into qk dot product, flash kernel legal. Float-equivalent to manual (reduction order only). NOT for the frozen science pair. Use for wall-clock speed table and future runs after fold is promoted.",
++  "seed": 42,
++  "save_dir": "/kaggle/working/runs/kaggle_200m_hla_speed_fold_s42",
++  "run_name": "kaggle_200m_hla_speed_fold_s42",
++  "train_path": "/kaggle/input/hla-c4-tokens/train_fixed_tokens.bin",
++  "val_path": "/kaggle/input/hla-c4-tokens/val_fixed_tokens.bin",
++  "init_ckpt": "/kaggle/working/inits/init_200m_s42_hla.pt",
++  "init_strict": true,
++  "check_init_hla_identity": true,
++  "expected_vocab_size": 50257,
++  "batch_size_per_device": 1,
++  "eval_batch_size_per_device": 2,
++  "grad_accum": 16,
++  "num_workers": 0,
++  "dataloader_prefetch_factor": 4,
++  "max_steps": 15000,
++  "warmup": 750,
++  "grad_clip": 1.0,
++  "lr": 0.0006,
++  "min_lr": 6e-05,
++  "weight_decay": 0.1,
++  "betas": [
++    0.9,
++    0.95
++  ],
++  "adam_eps": 1e-08,
++  "log_every": 50,
++  "val_every": 500,
++  "svd_every": 2500,
++  "val_batches": 100,
++  "resume_every": 500,
++  "save_every": 0,
++  "keep_last_checkpoints": 2,
++  "min_free_gb": 5.0,
++  "num_cores": 8,
++  "xla_loader_prefetch_size": 8,
++  "xla_device_prefetch_size": 4,
++  "validate_dataset_full": false,
++  "fail_on_nonfinite_val": true,
++  "allow_multiple_epochs": false,
++  "model": {
++    "block_size": 2048,
++    "vocab_size": 50257,
++    "n_layer": 12,
++    "n_head": 16,
++    "n_embd": 1024,
++    "dropout": 0.0,
++    "bias": false,
++    "gradient_checkpointing": false,
++    "fused_swiglu": true,
++    "use_rope": true,
++    "phase_mult": 0.15,
++    "use_laplace": true,
++    "laplace_alpha": 1.0,
++    "laplace_range_k": 0.8,
++    "laplace_range_v": 0.5,
++    "beta_k": 0.7,
++    "beta_v": 0.5,
++    "k_log_clip": 2.0,
++    "v_log_clip": 1.5,
++    "layer_dependent_gate": false,
++    "use_distance_laplace": true,
++    "distance_laplace_alpha": 0.5,
++    "distance_laplace_range": 1.0,
++    "distance_laplace_clip": 1.0,
++    "use_wpe": false,
++    "use_salience_bias": true,
++    "salience_alpha": 1.0,
++    "salience_range": 2.0,
++    "salience_clip": 3.0,
++    "baseline_type": "hla_v2_aggressive_gates_salience",
++    "attention_backend": "sdpa_fold"
++  },
++  "variant": "hla_v2_aggressive_gates_salience"
++}
+\ No newline at end of file
+diff --git a/configs/kaggle_200m_hla_speed_pallas_s42.json b/configs/kaggle_200m_hla_speed_pallas_s42.json
+new file mode 100644
+index 0000000..c99ab1e
+--- /dev/null
++++ b/configs/kaggle_200m_hla_speed_pallas_s42.json
+@@ -0,0 +1,76 @@
++{
++  "_doc": "SPEED BENCHMARK config (#30b): HLA with attention_backend=pallas - same fold math, kernel = torch_xla Pallas flash_attention (TPU only). Fails loud without torch_xla. Port recipe for other stacks: augment q/k with fold dims, call any flash kernel with explicit sm_scale=1/sqrt(hs).",
++  "seed": 42,
++  "save_dir": "/kaggle/working/runs/kaggle_200m_hla_speed_pallas_s42",
++  "run_name": "kaggle_200m_hla_speed_pallas_s42",
++  "train_path": "/kaggle/input/hla-c4-tokens/train_fixed_tokens.bin",
++  "val_path": "/kaggle/input/hla-c4-tokens/val_fixed_tokens.bin",
++  "init_ckpt": "/kaggle/working/inits/init_200m_s42_hla.pt",
++  "init_strict": true,
++  "check_init_hla_identity": true,
++  "expected_vocab_size": 50257,
++  "batch_size_per_device": 1,
++  "eval_batch_size_per_device": 2,
++  "grad_accum": 16,
++  "num_workers": 0,
++  "dataloader_prefetch_factor": 4,
++  "max_steps": 15000,
++  "warmup": 750,
++  "grad_clip": 1.0,
++  "lr": 0.0006,
++  "min_lr": 6e-05,
++  "weight_decay": 0.1,
++  "betas": [
++    0.9,
++    0.95
++  ],
++  "adam_eps": 1e-08,
++  "log_every": 50,
++  "val_every": 500,
++  "svd_every": 2500,
++  "val_batches": 100,
++  "resume_every": 500,
++  "save_every": 0,
++  "keep_last_checkpoints": 2,
++  "min_free_gb": 5.0,
++  "num_cores": 8,
++  "xla_loader_prefetch_size": 8,
++  "xla_device_prefetch_size": 4,
++  "validate_dataset_full": false,
++  "fail_on_nonfinite_val": true,
++  "allow_multiple_epochs": false,
++  "model": {
++    "block_size": 2048,
++    "vocab_size": 50257,
++    "n_layer": 12,
++    "n_head": 16,
++    "n_embd": 1024,
++    "dropout": 0.0,
++    "bias": false,
++    "gradient_checkpointing": false,
++    "fused_swiglu": true,
++    "use_rope": true,
++    "phase_mult": 0.15,
++    "use_laplace": true,
++    "laplace_alpha": 1.0,
++    "laplace_range_k": 0.8,
++    "laplace_range_v": 0.5,
++    "beta_k": 0.7,
++    "beta_v": 0.5,
++    "k_log_clip": 2.0,
++    "v_log_clip": 1.5,
++    "layer_dependent_gate": false,
++    "use_distance_laplace": true,
++    "distance_laplace_alpha": 0.5,
++    "distance_laplace_range": 1.0,
++    "distance_laplace_clip": 1.0,
++    "use_wpe": false,
++    "use_salience_bias": true,
++    "salience_alpha": 1.0,
++    "salience_range": 2.0,
++    "salience_clip": 3.0,
++    "baseline_type": "hla_v2_aggressive_gates_salience",
++    "attention_backend": "pallas"
++  },
++  "variant": "hla_v2_aggressive_gates_salience"
++}
+\ No newline at end of file
+diff --git a/configs/mini_124m_base_sdpa_s42.json b/configs/mini_124m_base_sdpa_s42.json
+new file mode 100644
+index 0000000..fcc5a45
+--- /dev/null
++++ b/configs/mini_124m_base_sdpa_s42.json
+@@ -0,0 +1,76 @@
++{
++  "_doc": "MINI 124M-class (768/12/12, total 131.3M, non-emb 92.7M; gpt2-small class) base, XLA fused sdpa. \u0414\u0435\u0448\u0451\u0432\u044b\u0439 smoke backend'\u0430. \u041d\u0415 \u0434\u043b\u044f \u043d\u0430\u0443\u0447\u043d\u044b\u0445 \u043a\u043b\u0435\u0439\u043c\u043e\u0432. 300 \u0448\u0430\u0433\u043e\u0432.",
++  "seed": 42,
++  "save_dir": "/kaggle/working/runs/mini_124m_base_sdpa_s42",
++  "run_name": "mini_124m_base_sdpa_s42",
++  "train_path": "/kaggle/input/hla-c4-tokens/train_fixed_tokens.bin",
++  "val_path": "/kaggle/input/hla-c4-tokens/val_fixed_tokens.bin",
++  "init_ckpt": "/kaggle/working/inits/init_200m_s42_base.pt",
++  "init_strict": true,
++  "check_init_hla_identity": true,
++  "expected_vocab_size": 50257,
++  "batch_size_per_device": 1,
++  "eval_batch_size_per_device": 2,
++  "grad_accum": 16,
++  "num_workers": 0,
++  "dataloader_prefetch_factor": 4,
++  "max_steps": 300,
++  "warmup": 30,
++  "grad_clip": 1.0,
++  "lr": 0.0006,
++  "min_lr": 6e-05,
++  "weight_decay": 0.1,
++  "betas": [
++    0.9,
++    0.95
++  ],
++  "adam_eps": 1e-08,
++  "log_every": 50,
++  "val_every": 100,
++  "svd_every": 2500,
++  "val_batches": 100,
++  "resume_every": 0,
++  "save_every": 0,
++  "keep_last_checkpoints": 2,
++  "min_free_gb": 5.0,
++  "num_cores": 8,
++  "xla_loader_prefetch_size": 8,
++  "xla_device_prefetch_size": 4,
++  "validate_dataset_full": false,
++  "fail_on_nonfinite_val": true,
++  "allow_multiple_epochs": false,
++  "model": {
++    "block_size": 2048,
++    "vocab_size": 50257,
++    "n_layer": 12,
++    "n_head": 12,
++    "n_embd": 768,
++    "dropout": 0.0,
++    "bias": false,
++    "gradient_checkpointing": false,
++    "fused_swiglu": true,
++    "use_rope": true,
++    "phase_mult": 0.0,
++    "use_laplace": true,
++    "laplace_alpha": 0.0,
++    "laplace_range_k": 0.8,
++    "laplace_range_v": 0.5,
++    "beta_k": 0.7,
++    "beta_v": 0.5,
++    "k_log_clip": 2.0,
++    "v_log_clip": 1.5,
++    "layer_dependent_gate": false,
++    "use_distance_laplace": true,
++    "distance_laplace_alpha": 0.0,
++    "distance_laplace_range": 1.0,
++    "distance_laplace_clip": 1.0,
++    "use_wpe": false,
++    "use_salience_bias": true,
++    "salience_alpha": 0.0,
++    "salience_range": 2.0,
++    "salience_clip": 3.0,
++    "baseline_type": "base_pm_ablated_v2",
++    "attention_backend": "sdpa"
++  },
++  "variant": "base_pm_ablated_v2"
++}
+\ No newline at end of file
+diff --git a/configs/mini_124m_hla_fold_s42.json b/configs/mini_124m_hla_fold_s42.json
+new file mode 100644
+index 0000000..ecda97d
+--- /dev/null
++++ b/configs/mini_124m_hla_fold_s42.json
+@@ -0,0 +1,76 @@
++{
++  "_doc": "MINI 124M-class (768/12/12, total 131.3M, non-emb 92.7M; gpt2-small class) HLA fold (#30). \u0414\u0435\u0448\u0451\u0432\u044b\u0439 smoke backend'\u0430. \u041d\u0415 \u0434\u043b\u044f \u043d\u0430\u0443\u0447\u043d\u044b\u0445 \u043a\u043b\u0435\u0439\u043c\u043e\u0432. 300 \u0448\u0430\u0433\u043e\u0432.",
++  "seed": 42,
++  "save_dir": "/kaggle/working/runs/mini_124m_hla_fold_s42",
++  "run_name": "mini_124m_hla_fold_s42",
++  "train_path": "/kaggle/input/hla-c4-tokens/train_fixed_tokens.bin",
++  "val_path": "/kaggle/input/hla-c4-tokens/val_fixed_tokens.bin",
++  "init_ckpt": "/kaggle/working/inits/init_200m_s42_hla.pt",
++  "init_strict": true,
++  "check_init_hla_identity": true,
++  "expected_vocab_size": 50257,
++  "batch_size_per_device": 1,
++  "eval_batch_size_per_device": 2,
++  "grad_accum": 16,
++  "num_workers": 0,
++  "dataloader_prefetch_factor": 4,
++  "max_steps": 300,
++  "warmup": 30,
++  "grad_clip": 1.0,
++  "lr": 0.0006,
++  "min_lr": 6e-05,
++  "weight_decay": 0.1,
++  "betas": [
++    0.9,
++    0.95
++  ],
++  "adam_eps": 1e-08,
++  "log_every": 50,
++  "val_every": 100,
++  "svd_every": 2500,
++  "val_batches": 100,
++  "resume_every": 0,
++  "save_every": 0,
++  "keep_last_checkpoints": 2,
++  "min_free_gb": 5.0,
++  "num_cores": 8,
++  "xla_loader_prefetch_size": 8,
++  "xla_device_prefetch_size": 4,
++  "validate_dataset_full": false,
++  "fail_on_nonfinite_val": true,
++  "allow_multiple_epochs": false,
++  "model": {
++    "block_size": 2048,
++    "vocab_size": 50257,
++    "n_layer": 12,
++    "n_head": 12,
++    "n_embd": 768,
++    "dropout": 0.0,
++    "bias": false,
++    "gradient_checkpointing": false,
++    "fused_swiglu": true,
++    "use_rope": true,
++    "phase_mult": 0.15,
++    "use_laplace": true,
++    "laplace_alpha": 1.0,
++    "laplace_range_k": 0.8,
++    "laplace_range_v": 0.5,
++    "beta_k": 0.7,
++    "beta_v": 0.5,
++    "k_log_clip": 2.0,
++    "v_log_clip": 1.5,
++    "layer_dependent_gate": false,
++    "use_distance_laplace": true,
++    "distance_laplace_alpha": 0.5,
++    "distance_laplace_range": 1.0,
++    "distance_laplace_clip": 1.0,
++    "use_wpe": false,
++    "use_salience_bias": true,
++    "salience_alpha": 1.0,
++    "salience_range": 2.0,
++    "salience_clip": 3.0,
++    "baseline_type": "hla_v2_aggressive_gates_salience",
++    "attention_backend": "sdpa_fold"
++  },
++  "variant": "hla_v2_aggressive_gates_salience"
++}
+\ No newline at end of file
+diff --git a/configs/mini_124m_hla_pallas_s42.json b/configs/mini_124m_hla_pallas_s42.json
+new file mode 100644
+index 0000000..af4a875
+--- /dev/null
++++ b/configs/mini_124m_hla_pallas_s42.json
+@@ -0,0 +1,76 @@
++{
++  "_doc": "MINI 124M-class (768/12/12, total 131.3M, non-emb 92.7M; gpt2-small class) HLA Pallas flash (#30b). \u0414\u0435\u0448\u0451\u0432\u044b\u0439 smoke backend'\u0430. \u041d\u0415 \u0434\u043b\u044f \u043d\u0430\u0443\u0447\u043d\u044b\u0445 \u043a\u043b\u0435\u0439\u043c\u043e\u0432. 300 \u0448\u0430\u0433\u043e\u0432.",
++  "seed": 42,
++  "save_dir": "/kaggle/working/runs/mini_124m_hla_pallas_s42",
++  "run_name": "mini_124m_hla_pallas_s42",
++  "train_path": "/kaggle/input/hla-c4-tokens/train_fixed_tokens.bin",
++  "val_path": "/kaggle/input/hla-c4-tokens/val_fixed_tokens.bin",
++  "init_ckpt": "/kaggle/working/inits/init_200m_s42_hla.pt",
++  "init_strict": true,
++  "check_init_hla_identity": true,
++  "expected_vocab_size": 50257,
++  "batch_size_per_device": 1,
++  "eval_batch_size_per_device": 2,
++  "grad_accum": 16,
++  "num_workers": 0,
++  "dataloader_prefetch_factor": 4,
++  "max_steps": 300,
++  "warmup": 30,
++  "grad_clip": 1.0,
++  "lr": 0.0006,
++  "min_lr": 6e-05,
++  "weight_decay": 0.1,
++  "betas": [
++    0.9,
++    0.95
++  ],
++  "adam_eps": 1e-08,
++  "log_every": 50,
++  "val_every": 100,
++  "svd_every": 2500,
++  "val_batches": 100,
++  "resume_every": 0,
++  "save_every": 0,
++  "keep_last_checkpoints": 2,
++  "min_free_gb": 5.0,
++  "num_cores": 8,
++  "xla_loader_prefetch_size": 8,
++  "xla_device_prefetch_size": 4,
++  "validate_dataset_full": false,
++  "fail_on_nonfinite_val": true,
++  "allow_multiple_epochs": false,
++  "model": {
++    "block_size": 2048,
++    "vocab_size": 50257,
++    "n_layer": 12,
++    "n_head": 12,
++    "n_embd": 768,
++    "dropout": 0.0,
++    "bias": false,
++    "gradient_checkpointing": false,
++    "fused_swiglu": true,
++    "use_rope": true,
++    "phase_mult": 0.15,
++    "use_laplace": true,
++    "laplace_alpha": 1.0,
++    "laplace_range_k": 0.8,
++    "laplace_range_v": 0.5,
++    "beta_k": 0.7,
++    "beta_v": 0.5,
++    "k_log_clip": 2.0,
++    "v_log_clip": 1.5,
++    "layer_dependent_gate": false,
++    "use_distance_laplace": true,
++    "distance_laplace_alpha": 0.5,
++    "distance_laplace_range": 1.0,
++    "distance_laplace_clip": 1.0,
++    "use_wpe": false,
++    "use_salience_bias": true,
++    "salience_alpha": 1.0,
++    "salience_range": 2.0,
++    "salience_clip": 3.0,
++    "baseline_type": "hla_v2_aggressive_gates_salience",
++    "attention_backend": "pallas"
++  },
++  "variant": "hla_v2_aggressive_gates_salience"
++}
+\ No newline at end of file
+diff --git a/docs/SPEED_BACKENDS.md b/docs/SPEED_BACKENDS.md
+new file mode 100644
+index 0000000..8f17921
+--- /dev/null
++++ b/docs/SPEED_BACKENDS.md
+@@ -0,0 +1,104 @@
++# HLA Speed Backends: how to run HLA at flash-attention speed on ANY stack
++
++## TL;DR for adopters
++
++All HLA additive attention biases are per-key or rank-1. Therefore they fold
++INTO the q/k dot product via 3 augmented head dimensions, after which **any
++flash-attention kernel is legal without modification**:
++
++```
++d  = head_size;  sd = sqrt(d);  p_i = pos_i / (block_size - 1)
++c_j = alpha_d * range_d * layer_mult * tanh(W_gate_d x_j)     # distance gate
++s_j = alpha_s * range_s * tanh(W_gate_sal x_j)                # salience gate
++
++q'_i = [q_i,  sd * p_i,  sd,  sd ]          # d+3 dims
++k'_j = [k_j,  c_j,  -p_j * c_j,  s_j ]      # d+3 dims
++
++softmax(q' k'^T / sd) == softmax(q k^T / sd  +  (p_i - p_j) * c_j  +  s_j)   EXACT
++```
++
++`layer_mult` (FIX #35, attack J2 - it was used above but never defined;
++a copy-pasting adopter could not have computed c_j):
++
++```
++layer_mult = 1.0                                          # default
++# if layer_dependent_gate:   static depth heuristic (see model.py __init__)
++# if additionally learnable_layer_temp:
++layer_mult = 1.0 + (layer_idx / n_layer) * softplus(W_layer_temp) / log(2)
++#            (softplus(0)=log 2  =>  exactly the static heuristic at init)
++```
++
++Call your kernel with an **explicit scale = 1/sqrt(d)** (NOT 1/sqrt(d+3)).
++The multiplicative mechanisms (K-mix, V-mix, Q-temp, phase rotation) modify
++q/k/v BEFORE attention and need nothing at all.
++
++Exactness condition (guard #29): |alpha * range| <= clip for each folded
++bias, so the clamp is provably inactive on the causal region. Our shipped
++configs satisfy it; configs that do not automatically fall back to the exact
++clamped manual path.
++
++## Backends in this repo
++
++| backend      | kernel                                             | device    | use case |
++|--------------|----------------------------------------------------|-----------|----------|
++| `manual`     | explicit att matrix, bit-exact                     | any       | the frozen science pair (V7/V8), diagnostics, sterility proofs |
++| `sdpa`       | `F.scaled_dot_product_attention`                   | GPU/TPU   | speed-base (dispatches to FlashAttention-2 on CUDA, XLA fused attention on TPU) |
++| `sdpa_fold`  | same kernel, HLA biases folded into q'/k' (#30)    | GPU/TPU   | production HLA |
++| `pallas`     | folded q'/k' -> `torch_xla ... flash_attention`    | TPU only  | max TPU speed; fails LOUD without torch_xla |
++
++Note on names: **Triton does not exist on TPU** (it is a CUDA/NVIDIA kernel
++compiler). Pallas is the ecosystem's answer: it lowers **through Triton on
++GPU and through Mosaic on TPU** - so "Pallas" is the honest cross-platform
++label, and `attention_backend="triton"` is rejected with ValueError to
++prevent accidental cargo-cult configs.
++
++## How the best labs integrate Pallas (and how we mirror it)
++
++Documented practice from the JAX/PyTorch-XLA ecosystem:
++
++1. **Reuse reference kernels, do not rewrite them.** The JAX repo ships
++   maintained Pallas kernels (flash attention among them); torch_xla adopts
++   them via `torch_xla.experimental.custom_kernel` (that is exactly what our
++   `pallas` backend calls). Writing kernels from scratch is reserved for
++   cases the compiler cannot fuse.
++2. **Trust XLA fusion first, drop to Pallas only when profiling says so.**
++   XLA already fuses attention well below ~8K sequence; hand kernels win at
++   long sequence / sparse patterns (Splash Attention). Our design follows
++   this: `sdpa` (XLA-fused) is the default speed path; `pallas` is the
++   opt-in maximum.
++3. **Never let a fast path silently change semantics.** Production stacks
++   gate kernel dispatch on exact applicability. Ours: fold is only taken
++   when the clamp is provably inactive (#29 guard); diagnostics force the
++   bit-exact manual path; pallas without torch_xla raises ImportError
++   instead of silently benchmarking the wrong kernel.
++
++## Config matrix (all validated by GPTConfig at test time)
++
++TPU (Kaggle v5e-8):
++- `kaggle_200m_base_speed_sdpa_s42.json`  - speed-base
++- `kaggle_200m_hla_speed_fold_s42.json`   - HLA fold
++- `kaggle_200m_hla_speed_pallas_s42.json` - HLA Pallas
++- `700m_base_14b_sdpa_s42.json`, `700m_hla_14b_fold_s42.json`, `700m_hla_14b_pallas_s42.json`
++
++GPU (any CUDA box with PyTorch >= 2.x):
++- `gpu_200m_base_flash_s42.json`      - base on FlashAttention-2 via SDPA
++- `gpu_200m_hla_flash_fold_s42.json`  - HLA fold on FlashAttention-2
++- `gpu_700m_base_flash_s42.json`, `gpu_700m_hla_flash_fold_s42.json`
++
++## Verified equivalence (CPU, two fresh clones)
++
++- fold vs manual logits (all gates live): 5.96e-07; grads 4.84e-08; loss 0.0
++- weights after one AdamW step: 4.1e-05 (fp32 reduction-order scale)
++- binding-clip configs: bit-exact fallback to manual (torch.equal)
++- diagnostics on: bit-exact manual (torch.equal)
++- sterility caveat: flash reduction order != manual order, so fold@Theta0 vs
++  base is ~5e-07, NOT 0.0 - this is why the SCIENCE pair stays on `manual`
++  and speed numbers are reported from the speed configs separately.
++
++## What is still TPU-only (honest list)
++
++- wall-clock numbers for sdpa/fold/pallas on v5e-8 (smoke planned: 200 steps
++  each, one session, after the science pair finishes);
++- pallas kernel gradient path on real hardware (torch_xla custom kernels
++  have their own backward; smoke includes a backward step);
++- bf16 behavior of the folded extra dims under Mosaic lowering.
+diff --git a/docs/THEORY.md b/docs/THEORY.md
+index e0a2a2b..eefc8b5 100644
+--- a/docs/THEORY.md
++++ b/docs/THEORY.md
+@@ -46,17 +46,18 @@ with the components (all zero / identity at initialization):
+ 
+ | Symbol | Definition | Mechanism | Init value |
+ |---|---|---|---|
+-| R(θ_i) | pairwise rotation by θ_i = π·ρ_h·λ_l·tanh(W_φq x_i) | phase (query side) | R(0) = **I** |
+-| R(φ_j) | pairwise rotation by φ_j = π·ρ_h·λ_l·tanh(W_φk x_j) | phase (key side) | R(0) = **I** |
+-| m_j | (1−β_k) + β_k·exp(clamp(α·tanh(W_gk x_j)·r_k, ±c_k)) | K-gate | **1** |
+-| u_j | (1−β_v) + β_v·exp(clamp(α·tanh(W_gv x_j)·r_v, ±c_v)) | V-gate | **1** |
++| R(θ_i) | pairwise rotation by θ_i = π·μ_φ·ρ_h·λ_l·tanh(W_φq x_i) | phase (query side) | R(0) = **I** |
++| R(φ_j) | pairwise rotation by φ_j = π·μ_φ·ρ_h·λ_l·tanh(W_φk x_j) | phase (key side) | R(0) = **I** |
++| m_j | (1−β_k) + β_k·exp(clamp(α·tanh(W_gk x_j)·r_k·λ_l, ±c_k·λ_l)) | K-gate | **1** |
++| u_j | (1−β_v) + β_v·exp(clamp(α·tanh(W_gv x_j)·r_v·λ_l, ±c_v·λ_l)) | V-gate | **1** |
+ | B_ij | b^sal_j + b^dist_ij + (S_i − S_j) | additive biases | **0** |
+ | b^sal_j | clamp(α_s·r_s·tanh(W_s x_j), ±c_s) | salience | 0 |
+ | b^dist_ij | clamp(α_d·r_d·λ_l·d(i,j)·tanh(W_gd x_j), ±c_d) — W_gd is distance's OWN gate (deconfounded from the K-gate); d(i,j) = (i−j)/(block_size−1) ∈ [0,1], normalized by the MODEL constant (not the batch length) so the bias for a fixed pair is independent of how much context is in the batch — prefix-stable, hence KV-cache-exact (tested) | distance | 0 |
+ | τ_i | exp(clamp(α_q·r_q·tanh(W_qt x_i), ±c_q)) — per-query softmax temperature (SSA/SSMax family; the only non-no-op Q-side score form, since an additive per-query bias cancels in softmax) | Q-temp | **1** |
+ | S_i − S_j | S_t = Σ_{τ≤t} α_f·r_f·tanh(W_f x_τ), clamped | forget (FoX-family) | 0 |
+ | ρ_h | 1 + tanh(s_h) — per-head phase budget | head adaptivity | 1 |
+-| λ_l | 1 + (l/L)·softplus(θ_l)/softplus(0) — depth profile | layer adaptivity | 1 + l/L (static) |
++| μ_φ | `phase_mult` config constant (0.15 in all runs) — global phase budget; max attainable angle = π·μ_φ·2·2 = 0.6π with head+layer budgets maxed | phase scale | 0.15 (fixed) |
++| λ_l | 1 + (l/L)·softplus(θ_l)/softplus(0) — depth profile; applies to phase, K/V-gates (range AND clamp) and distance; NOT to salience/q-temp/forget (code-verified r85) | layer adaptivity | 1 + l/L (static) |
+ 
+ Where the base model is recovered by ρ, λ multipliers irrelevant because every
+ learned input to them is zero. **Reading the formula**: R controls *where
+@@ -239,7 +240,12 @@ rule, in a fixed order:
+ - ∂L/∂r_k = ∂L/∂r_v = 0 (each enters as exp(α·r·tanh(Wx)) with tanh(0)=0:
+   the derivative carries a tanh(Wx) factor that is identically zero at Θ₀);
+ - ∂L/∂s_h = 0 (phase budget multiplies angles that are zero);
+-- ∂L/∂W_f = 0 while r_f = 0 (the whole forget branch is scaled by r_f);
++- ∂L/∂r_f = 0 while the forget GATE is closed (the derivative carries a
++  tanh(W_f x) factor, identically zero at Θ₀). NOTE the converse of the
++  naive reading: r_f = forget_range·(1+flex·tanh(W_range_f)) equals 0.1,
++  NOT 0, at Θ₀ — identity-at-init is carried by the gate, so ∂L/∂W_f is
++  a small NONZERO PRIMARY gradient (measured 9.1e-4 at tiny-Θ₀): W_f
++  wakes FIRST, r_f wakes only after the gate opens (code-verified r86);
+ - ∂L/∂θ_l = 0 (depth profile multiplies zero-valued mechanism outputs).
+ Measured at Θ₀: primary gradients 1e-5–3e-3; ALL secondary gradients 0.0
+ exactly (bit-zero, not small). Consequence - a falsifiable training-dynamics
+diff --git a/scripts/analyze_checkpoint.py b/scripts/analyze_checkpoint.py
+index baf5d08..34ee429 100644
+--- a/scripts/analyze_checkpoint.py
++++ b/scripts/analyze_checkpoint.py
+@@ -33,6 +33,17 @@ from src.data import FixedDataset  # noqa: E402
+ from src.model import GPT, GPTConfig  # noqa: E402
+ 
+ 
++def _clean_json40(o):
++    """FIX #40: NaN/Infinity are invalid JSON (RFC 8259); emit null."""
++    if isinstance(o, dict):
++        return {k: _clean_json40(v) for k, v in o.items()}
++    if isinstance(o, list):
++        return [_clean_json40(v) for v in o]
++    if isinstance(o, float) and (o != o or o in (float("inf"), float("-inf"))):
++        return None
++    return o
++
++
+ def load_json(path: str) -> Dict[str, Any]:
+     with open(path, "r", encoding="utf-8") as f:
+         return json.load(f)
+@@ -64,6 +75,9 @@ def load_checkpoint_model(ckpt_path: str, config_path: str | None, device: str)
+     else:
+         raise ValueError("Provide --config when checkpoint has no embedded config")
+     state = payload["model"] if isinstance(payload, dict) and "model" in payload else payload
++        # FIX #32 (attack G1): analysis must be bit-exact and CPU-runnable;
++    # speed configs may declare sdpa_fold/pallas. Pin manual for analysis.
++    cfg["model"] = dict(cfg["model"], attention_backend="manual")
+     model = GPT(GPTConfig(**cfg["model"]))
+     model.load_state_dict(state, strict=True)
+     model.to(device)
+@@ -385,7 +399,7 @@ def main() -> None:
+ 
+     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
+     with open(args.out, "w", encoding="utf-8") as f:
+-        json.dump(result, f, indent=2, sort_keys=True)
++        json.dump(_clean_json40(result), f, indent=2, sort_keys=True)
+     print(f"wrote {args.out}")
+ 
+ 
+diff --git a/scripts/bench.py b/scripts/bench.py
+index 0b8bac2..6d63a90 100644
+--- a/scripts/bench.py
++++ b/scripts/bench.py
+@@ -57,7 +57,15 @@ def bench_config(path: str, *, steps: int, batch: int, seq_len: int,
+             times.append(time.perf_counter() - t0)
+     med = statistics.median(times)
+     return {"median_step_sec": med, "tokens_per_sec": batch * T / med,
+-            "params": model.parameter_count()}
++            "params": model.parameter_count(),
++            # FIX #33 (attack H2): the speed table must carry its own
++            # provenance. Without recording WHICH backend was actually
++            # benchmarked, a reviewer can claim the numbers came from the
++            # wrong path. Also record steps/batch/seq for reproducibility.
++            "attention_backend": cfg.get("attention_backend", "manual"),
++            "config_path": os.path.abspath(path),
++            "steps": steps, "batch": batch, "seq_len": T,
++            "torch_version": torch.__version__}
+ 
+ 
+ def main() -> None:
+diff --git a/scripts/causal_patch.py b/scripts/causal_patch.py
+index 11c37f7..ff00758 100644
+--- a/scripts/causal_patch.py
++++ b/scripts/causal_patch.py
+@@ -118,6 +118,13 @@ def build_franken(base_state: Dict[str, torch.Tensor],
+         body, graft = hla_state, base_state
+     else:
+         raise ValueError(f"unknown donor: {donor}")
++    # FIX #41 (attack P5): an unknown transplant name silently degraded to
++    # qk-only splicing (the elif chain matched nothing beyond c_attn rows) -
++    # an H5 caller passing a typo would get a VALID-LOOKING but wrong-arm
++    # closure. The CLI is argparse-guarded; the function must be too.
++    if transplant not in ("qk", "phase", "retrieval", "full"):
++        raise ValueError(f"unknown transplant set: {transplant!r} "
++                         f"(want qk|phase|retrieval|full)")
+     if transplant == "full":
+         return dict(graft)
+ 
+@@ -215,7 +222,7 @@ def gap_closure(base: Dict[str, float], hla: Dict[str, float],
+                "gap": gap}
+         if not (gap == gap) or abs(gap) < MIN_MEANINGFUL_GAP:
+             rec["closure"] = float("nan")
+-            rec["closure_note"] = 1.0  # gap too small to attribute
++            rec["gap_too_small"] = 1.0  # #39: self-documenting numeric flag
+         else:
+             rec["closure"] = (franken[m] - base[m]) / gap
+             noise = max(base.get(f"{m}_std", 0.0), hla.get(f"{m}_std", 0.0),
+@@ -226,7 +233,16 @@ def gap_closure(base: Dict[str, float], hla: Dict[str, float],
+             # probe noise - the JSON says so explicitly instead of letting a
+             # reader over-trust a percentage.
+             rec["min_detectable_gap_z3"] = 3.0 * noise
+-            rec["gap_over_noise_z"] = abs(gap) / noise if noise > 0 else float("inf")
++            # FIX #40 (attack N): float("inf")/NaN serialize as Infinity/NaN
++            # literals - the H5 artifact (a published paper artifact!) becomes
++            # INVALID JSON per RFC 8259 (jq/browsers/strict parsers reject).
++            # noise==0 means "measured exactly across seeds": encode as a
++            # large finite sentinel + explicit flag instead of Infinity.
++            if noise > 0:
++                rec["gap_over_noise_z"] = abs(gap) / noise
++            else:
++                rec["gap_over_noise_z"] = 1e9
++                rec["noise_exact_zero"] = 1.0
+             rec["powered"] = 1.0 if (noise == 0.0 or abs(gap) >= 3.0 * noise) else 0.0
+         out[m] = rec
+     return out
+@@ -263,6 +279,15 @@ def main() -> None:
+             f"got {args.probe_seeds!r}") from None
+ 
+     cfg = json.load(open(args.hla_config, encoding="utf-8"))["model"]
++    # FIX #32 (attack G1): H5 analysis must be bit-exact and CPU-runnable.
++    # Speed configs may declare attention_backend="sdpa_fold" (different
++    # reduction order, ~1e-7 drift in probe stats) or "pallas" (crashes
++    # without torch_xla). Analysis semantics are backend-independent, so we
++    # pin the exact manual path regardless of what the training config used.
++    if cfg.get("attention_backend", "manual") != "manual":
++        print(f"[causal_patch] overriding attention_backend="
++              f"{cfg['attention_backend']!r} -> 'manual' (bit-exact analysis)")
++        cfg["attention_backend"] = "manual"
+     base_state = load_state(args.base_checkpoint)
+     hla_state = load_state(args.hla_checkpoint)
+     results: Dict[str, Dict[str, float]] = {}
+@@ -289,7 +314,7 @@ def main() -> None:
+         results["gap_closure"] = closure  # type: ignore[assignment]
+         print("\n=== H5 FORWARD closure (sufficiency; pre-reg: >0.50 causal, <0.20 not) ===")
+         for m, rec in closure.items():
+-            if rec.get("closure_note"):
++            if rec.get("gap_too_small"):
+                 print(f"  {m:24s}: gap={rec['gap']:+.6f} TOO SMALL to attribute (no claim)")
+             else:
+                 print(f"  {m:24s}: closure={rec['closure']:+.3f} "
+@@ -300,7 +325,7 @@ def main() -> None:
+         results["gap_closure_reverse"] = closure_r  # type: ignore[assignment]
+         print("\n=== H5 REVERSE closure (necessity; pre-reg: <0.50 = gain collapses) ===")
+         for m, rec in closure_r.items():
+-            if rec.get("closure_note"):
++            if rec.get("gap_too_small"):
+                 print(f"  {m:24s}: gap={rec['gap']:+.6f} TOO SMALL to attribute (no claim)")
+             else:
+                 print(f"  {m:24s}: closure={rec['closure']:+.3f} "
+@@ -315,7 +340,17 @@ def main() -> None:
+                        "probe_batch": args.probe_batch}
+     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
+     with open(args.out, "w", encoding="utf-8") as f:
+-        json.dump(results, f, indent=2)
++        # FIX #40: allow_nan=False would crash on legit NaN probe values;
++        # sanitize instead: NaN -> null (valid JSON, honest "no value").
++        def _clean(o):
++            if isinstance(o, dict):
++                return {k: _clean(v) for k, v in o.items()}
++            if isinstance(o, list):
++                return [_clean(v) for v in o]
++            if isinstance(o, float) and (o != o or o in (float("inf"), float("-inf"))):
++                return None
++            return o
++        json.dump(_clean(results), f, indent=2)
+     print(f"wrote {args.out}")
+ 
+ 
+diff --git a/scripts/eval_passkey.py b/scripts/eval_passkey.py
+index 716e6cb..8b87e71 100644
+--- a/scripts/eval_passkey.py
++++ b/scripts/eval_passkey.py
+@@ -127,6 +127,9 @@ def main() -> None:
+     args = ap.parse_args()
+ 
+     cfg = json.load(open(args.config, encoding="utf-8"))["model"]
++        # FIX #32 (attack G1): analysis must be bit-exact and CPU-runnable;
++    # speed configs may declare sdpa_fold/pallas. Pin manual for analysis.
++    cfg = dict(cfg, attention_backend="manual")
+     model = GPT(GPTConfig(**cfg)).eval()
+     try:
+         payload = torch.load(args.checkpoint, map_location="cpu",
+diff --git a/scripts/make_paper_figures.py b/scripts/make_paper_figures.py
+index 97c4fc9..e1225fe 100644
+--- a/scripts/make_paper_figures.py
++++ b/scripts/make_paper_figures.py
+@@ -88,7 +88,33 @@ def read_log(path: str) -> Dict[str, List[float]]:
+     return out
+ 
+ 
++def _check_coverage(base_log, hla_log, fig_name: str) -> None:
++    """FIX #34 (attack I2): with multi-session runs (autoresume) a user can
++    accidentally pass a tail-only CSV (e.g. only session-2, steps 10550+)
++    against a full-coverage twin. The old code silently drew a figure whose
++    two curves cover DIFFERENT token ranges - a silently-wrong paper figure.
++    Require comparable coverage; fail loud with the fix (concatenate the
++    session CSVs; read_log resolves resume seams with keep-last)."""
++    b = read_log(base_log) if isinstance(base_log, str) else base_log
++    h = read_log(hla_log) if isinstance(hla_log, str) else hla_log
++    bs = [t for t in b.get("tokens_seen", []) if t == t]
++    hs = [t for t in h.get("tokens_seen", []) if t == t]
++    if not bs or not hs:
++        raise SystemExit(f"{fig_name}: empty tokens_seen in one of the logs")
++    # Trigger only on a REAL tail-only log: the two starts differ by more
++    # than 25% of the full token range. Small grid shifts from asymmetric
++    # resumes (#16) are legitimate and handled downstream.
++    if abs(bs[0] - hs[0]) > 0.25 * max(bs[-1], hs[-1]):
++        raise SystemExit(
++            f"{fig_name}: coverage mismatch - base starts at {bs[0]:,.0f} "
++            f"tokens but HLA at {hs[0]:,.0f}. One log looks tail-only "
++            f"(a single resume-session CSV?). Concatenate ALL session CSVs "
++            f"for that run first (read_log resolves duplicate steps "
++            f"keep-last); refusing to draw a silently-wrong figure.")
++
++
+ def fig1_twin_divergence(base_log, hla_log, out, seed_std: float = 0.0):
++    _check_coverage(base_log, hla_log, "fig1")
+     plt = require_matplotlib()
+     b, h = read_log(base_log), read_log(hla_log)
+     fig, ax = plt.subplots(figsize=(4.2, 3.0))
+@@ -128,6 +154,7 @@ def fig1_twin_divergence(base_log, hla_log, out, seed_std: float = 0.0):
+ 
+ 
+ def fig2_litm_curves(base_log, hla_log, out, n_checkpoints: int = 3):
++    _check_coverage(base_log, hla_log, "fig2")
+     plt = require_matplotlib()
+     cols = ["pos_10", "pos_30", "pos_50", "pos_70", "pos_90"]
+     depths = [10, 30, 50, 70, 90]
+@@ -165,7 +192,7 @@ def fig3_gap_closure(causal_json, out):
+     if not gc:
+         raise SystemExit("causal JSON has no gap_closure block (rerun causal_patch.py)")
+     gcr = res.get("gap_closure_reverse") or {}
+-    metrics = [m for m, r in gc.items() if not r.get("closure_note")]
++    metrics = [m for m, r in gc.items() if not r.get("gap_too_small")]
+     if not metrics:
+         raise SystemExit("all gaps flagged too-small - nothing to plot honestly")
+     fig, axes = plt.subplots(1, len(metrics), figsize=(3.1 * len(metrics), 3.2),
+@@ -181,7 +208,7 @@ def fig3_gap_closure(causal_json, out):
+         title = f"{m}\nfwd={r['closure']:.2f}"
+         if "closure_std_bound" in r:
+             title += f"±{r['closure_std_bound']:.2f}"
+-        if rr and not rr.get("closure_note"):
++        if rr and not rr.get("gap_too_small"):
+             names.insert(2, "anti-frk")
+             vals.insert(2, rr["franken"])
+             colors.insert(2, "#8FB03E")
+@@ -229,6 +256,7 @@ def fig4_knockout_context(analysis_json, out):
+ 
+ 
+ def fig5_mechanism_trajectories(base_log, hla_log, out):
++    _check_coverage(base_log, hla_log, "fig5")
+     """Internal dynamics over training (GDN/Diff reviewer lesson: show WHEN
+     mechanisms wake up, not just that they exist): gate/salience activity,
+     saturation, and retrieval probes on one page, base vs HLA."""
+diff --git a/scripts/profile_flops.py b/scripts/profile_flops.py
+index 0333809..92224a9 100644
+--- a/scripts/profile_flops.py
++++ b/scripts/profile_flops.py
+@@ -8,6 +8,17 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
+ from src.model import GPT, GPTConfig
+ 
+ 
++def _clean_json40(o):
++    """FIX #40: NaN/Infinity are invalid JSON (RFC 8259); emit null."""
++    if isinstance(o, dict):
++        return {k: _clean_json40(v) for k, v in o.items()}
++    if isinstance(o, list):
++        return [_clean_json40(v) for v in o]
++    if isinstance(o, float) and (o != o or o in (float("inf"), float("-inf"))):
++        return None
++    return o
++
++
+ def count_forward_flops(model: GPT, batch_size: int = 1, seq_len: int = 2048) -> int:
+     """Count forward FLOPs per call (excluding backward).
+ 
+@@ -187,7 +198,7 @@ def main():
+         "matched_hla_max_steps": matched_hla_steps,
+     }
+     with open(args.out, "w") as f:
+-        json.dump(results, f, indent=2)
++        json.dump(_clean_json40(results), f, indent=2)
+     print(f"\nSaved: {args.out}")
+ 
+ 
+diff --git a/scripts/train_probe.py b/scripts/train_probe.py
+index 77dc1fe..081d1ff 100644
+--- a/scripts/train_probe.py
++++ b/scripts/train_probe.py
+@@ -222,6 +222,9 @@ def main() -> None:
+     args = ap.parse_args()
+ 
+     cfg = json.load(open(args.config, encoding="utf-8"))["model"]
++        # FIX #32 (attack G1): analysis must be bit-exact and CPU-runnable;
++    # speed configs may declare sdpa_fold/pallas. Pin manual for analysis.
++    cfg = dict(cfg, attention_backend="manual")
+     model = GPT(GPTConfig(**cfg)).eval()
+     try:
+         payload = torch.load(args.checkpoint, map_location="cpu", weights_only=True)
+@@ -244,10 +247,20 @@ def main() -> None:
+     res["meta"] = {"checkpoint": args.checkpoint, "config": args.config}
+     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
+     json.dump(res, open(args.out, "w", encoding="utf-8"), indent=2)
+-    print(f"probe_acc middle={res.get('probe_acc_middle'):.3f} "
+-          f"edge={res.get('probe_acc_edge'):.3f} "
+-          f"litm_gap={res.get('probe_litm_gap'):+.3f} "
+-          f"(chance={res.get('chance'):.3f})")
++    # FIX #42 (attack R2): run_probe's early-return path (e.g. the
++    # "vocab/block too small" guard) yields a partial dict; formatting None
++    # with :.3f crashed main AFTER the JSON was written -> rc=1 with a
++    # valid artifact on disk, which an orchestration script would read as
++    # total failure. Print defensively; the JSON remains the ground truth.
++    def _f(x, spec="{:.3f}"):
++        return spec.format(x) if isinstance(x, (int, float)) and x == x else "n/a"
++    if res.get("note"):
++        print(f"probe: partial result ({res['note']}) - see JSON")
++    else:
++        print(f"probe_acc middle={_f(res.get('probe_acc_middle'))} "
++              f"edge={_f(res.get('probe_acc_edge'))} "
++              f"litm_gap={_f(res.get('probe_litm_gap'), '{:+.3f}')} "
++              f"(chance={_f(res.get('chance'))})")
+     sel = res.get("probe_selectivity") or {}
+     if sel:
+         worst = min(sel.values())
+diff --git a/src/model.py b/src/model.py
+index ec34a79..89786a0 100644
+--- a/src/model.py
++++ b/src/model.py
+@@ -555,6 +555,78 @@ class CausalSelfAttention(nn.Module):
+             y = y.transpose(1, 2).contiguous().view(B, T, C)
+             return self.c_proj(y)
+ 
++        # SPEED #30 (sdpa_fold): V8 measured the exact manual path at ~94k tok/s
++        # vs 152k for base-on-SDPA - the dominant cost is materializing att
++        # itself, not side buffers (#28 removed those; +5% only). Fix: every
++        # ACTIVE additive bias of ours is per-key or rank-1, so it can ride
++        # INSIDE the qk dot product via augmented head dims:
++        #   distance: bias_ij = p_i*c_j - p_j*c_j  ->  q+=[sd*p_i, sd*1],
++        #             k+=[c_j, -p_j*c_j]           (exact iff clamp inactive:
++        #             |alpha*range| <= clip, the #29 guard)
++        #   salience: bias_ij = s_j               ->  q+=[sd*1], k+=[s_j]
++        #             (exact iff |alpha*range| <= clip)
++        # Then softmax((q' k'^T)/sd) == softmax(qk/sd + bias) EXACTLY in real
++        # arithmetic; float diff is reduction-order only (~1e-6). This makes
++        # the flash/SDPA kernel legal for HLA: zero (B,H,T,T) materialization.
++        # NOT used for the frozen science pair (bit-exact manual path there);
++        # it is the production/speed backend, verified vs manual in tests.
++        fold_ok = (
++            self.attention_backend in ("sdpa_fold", "pallas")
++            and not self.capture_diagnostics
++            and not self.capture_attention
++            and not (self.use_forget_gate and self.forget_alpha != 0.0)
++            and (not (self.use_distance_laplace and self.distance_laplace_alpha != 0.0)
++                 or abs(float(self.distance_laplace_alpha) * float(self.distance_laplace_range))
++                 <= float(self.distance_laplace_clip))
++            and (not (self.use_salience_bias and self.salience_alpha != 0.0)
++                 or abs(float(self.salience_alpha) * float(self.salience_range))
++                 <= float(self.salience_clip))
++        )
++        if fold_ok:
++            scale = 1.0 / math.sqrt(hs)
++            sd = math.sqrt(hs)
++            extras_q, extras_k = [], []
++            if self.use_distance_laplace and self.distance_laplace_alpha != 0.0:
++                gate_d = torch.tanh(self.W_gate_d(x)).float()  # (B, T, H)
++                pos_n = (torch.arange(T, device=x.device).float()
++                         / float(max(1, self.block_size - 1)))
++                coef = (self.distance_laplace_alpha
++                        * self.distance_laplace_range * layer_mult)
++                cg = (coef * gate_d).transpose(1, 2)  # (B, H, T)
++                extras_q.append((sd * pos_n).view(1, 1, T, 1)
++                                .expand(B, self.n_head, T, 1))
++                extras_q.append(q.new_full((B, self.n_head, T, 1), sd,
++                                           dtype=torch.float32))
++                extras_k.append(cg.unsqueeze(-1))
++                extras_k.append((-pos_n.view(1, 1, T) * cg).unsqueeze(-1))
++            if self.use_salience_bias and self.salience_alpha != 0.0:
++                gate_sal = torch.tanh(self.W_gate_sal(x)).float()  # (B, T, H)
++                sal = (self.salience_alpha * self.salience_range
++                       * gate_sal).transpose(1, 2)  # (B, H, T)
++                extras_q.append(q.new_full((B, self.n_head, T, 1), sd,
++                                           dtype=torch.float32))
++                extras_k.append(sal.unsqueeze(-1))
++            if extras_q:
++                qf = torch.cat([q] + [e.to(q.dtype) for e in extras_q], dim=-1)
++                kf = torch.cat([k] + [e.to(k.dtype) for e in extras_k], dim=-1)
++            else:
++                qf, kf = q, k
++            if self.attention_backend == "pallas":
++                # TPU path: torch_xla Pallas flash-attention kernel. The fold
++                # makes it legal: biases live INSIDE q'/k', the kernel only
++                # needs plain causal softmax(q'k'^T*scale)@v. Top-lab port
++                # recipe: augment q/k exactly like above, then call ANY flash
++                # kernel (FlashAttention-2 on CUDA, Pallas on TPU) with an
++                # explicit scale=1/sqrt(hs) (NOT 1/sqrt(hs+extra)).
++                from torch_xla.experimental.custom_kernel import flash_attention
++                y = flash_attention(qf, kf, v, causal=True, sm_scale=scale)
++            else:
++                y = F.scaled_dot_product_attention(
++                    qf, kf, v, attn_mask=None, dropout_p=0.0,
++                    is_causal=True, scale=scale)
++            y = y.transpose(1, 2).contiguous().view(B, T, C)
++            return self.c_proj(y)
++
+         att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(hs))
+ 
+ 
+@@ -823,7 +895,7 @@ class GPTConfig:
+     gradient_checkpointing: bool = True
+     fused_swiglu: bool = True
+     ffn_hidden_multiple_of: int = 64
+-    attention_backend: str = "manual"  # "manual" or optional "sdpa" speed-probe backend
++    attention_backend: str = "manual"  # "manual" | "sdpa" | "sdpa_fold" | "pallas" (#30: rank-1 biases fold into qk; pallas = same fold through torch_xla Pallas flash kernel on TPU)
+ 
+     baseline_type: str = "parameter_matched_ablated"
+ 
+@@ -888,8 +960,9 @@ class GPTConfig:
+             raise ValueError("layer_dependent_phase requires layer_dependent_gate=true (shared depth profile)")
+         if self.ffn_hidden_multiple_of <= 0:
+             raise ValueError("ffn_hidden_multiple_of must be positive")
+-        if self.attention_backend not in {"manual", "sdpa"}:
+-            raise ValueError("attention_backend must be 'manual' or 'sdpa'")
++        if self.attention_backend not in {"manual", "sdpa", "sdpa_fold", "pallas"}:
++            raise ValueError(
++                "attention_backend must be 'manual', 'sdpa', 'sdpa_fold' or 'pallas'")
+ 
+     def to_dict(self) -> Dict[str, Any]:
+         return asdict(self)
+diff --git a/tests/test_ablation_configs.py b/tests/test_ablation_configs.py
+index b1df7cf..7d3591a 100644
+--- a/tests/test_ablation_configs.py
++++ b/tests/test_ablation_configs.py
+@@ -1202,3 +1202,155 @@ class TestLogToolsCrashResumeContract:
+         body = src[i:j]
+         assert 'legend(loc="lower left")' in body, \
+             "fig1 legend must be pinned (default lands under the inset)"
++
++
++class TestSpeedBackendConfigMatrix:
++    """#30/#30b config matrix: every speed config must load through GPTConfig,
++    declare exactly the intended backend, satisfy the fold-legality invariant
++    (|alpha*range| <= clip for each active folded bias), and GPU configs must
++    not request the TPU-only pallas backend."""
++
++    TPU = {
++        "kaggle_200m_base_speed_sdpa_s42": "sdpa",
++        "kaggle_200m_hla_speed_fold_s42": "sdpa_fold",
++        "kaggle_200m_hla_speed_pallas_s42": "pallas",
++        "700m_base_14b_sdpa_s42": "sdpa",
++        "700m_hla_14b_fold_s42": "sdpa_fold",
++        "700m_hla_14b_pallas_s42": "pallas",
++    }
++    GPU = {
++        "gpu_200m_base_flash_s42": "sdpa",
++        "gpu_200m_hla_flash_fold_s42": "sdpa_fold",
++        "gpu_700m_base_flash_s42": "sdpa",
++        "gpu_700m_hla_flash_fold_s42": "sdpa_fold",
++    }
++
++    def _check(self, name, backend):
++        import json, os
++        from src.model import GPTConfig
++        path = os.path.join(ROOT, "configs", name + ".json")
++        m = json.load(open(path))["model"]
++        cfg = GPTConfig(**m)
++        assert cfg.attention_backend == backend, name
++        if m.get("use_distance_laplace") and m.get("distance_laplace_alpha", 0):
++            assert abs(m["distance_laplace_alpha"] * m.get("distance_laplace_range", 1.0)) \
++                <= m.get("distance_laplace_clip", 1.0), name
++        if m.get("use_salience_bias") and m.get("salience_alpha", 0):
++            assert abs(m["salience_alpha"] * m.get("salience_range", 1.0)) \
++                <= m.get("salience_clip", 2.0), name
++
++    def test_tpu_matrix(self):
++        for name, backend in self.TPU.items():
++            self._check(name, backend)
++
++    def test_gpu_matrix_no_pallas(self):
++        for name, backend in self.GPU.items():
++            self._check(name, backend)
++            assert backend != "pallas"
++
++    def test_speed_docs_exist(self):
++        import os
++        assert os.path.exists(os.path.join(ROOT, "docs", "SPEED_BACKENDS.md"))
++
++
++class TestBenchSpeedProvenance:
++    """Attack round H (speed-claim methodology). #33: the bench JSON must
++    record WHICH backend was actually measured (plus shapes and torch
++    version) - without provenance a reviewer can dismiss the speed table.
++    H3a: self-vs-self ratio is the noise floor (sanity). H3b: pallas on a
++    CPU host fails loud in bench too - a silent manual fallback would fake
++    the speed table."""
++
++    def _cfg(self, tmp_path, name, **extra):
++        import json
++        kw = dict(block_size=128, vocab_size=256, padded_vocab_size=256,
++                  n_layer=1, n_head=2, n_embd=64,
++                  gradient_checkpointing=False, **extra)
++        p = tmp_path / f"{name}.json"
++        p.write_text(json.dumps({"model": kw}))
++        return str(p)
++
++    def test_bench_records_backend_provenance(self, tmp_path):
++        import json, subprocess, sys, os
++        m = self._cfg(tmp_path, "m", attention_backend="manual")
++        f = self._cfg(tmp_path, "f", phase_mult=0.15,
++                      use_distance_laplace=True, distance_laplace_alpha=0.5,
++                      attention_backend="sdpa_fold")
++        out = tmp_path / "b.json"
++        r = subprocess.run([sys.executable,
++                            os.path.join(ROOT, "scripts", "bench.py"),
++                            "--base", m, "--hla", f, "--steps", "2",
++                            "--batch", "1", "--seq-len", "64",
++                            "--out", str(out)],
++                           capture_output=True, text=True, cwd=ROOT)
++        assert r.returncode == 0, r.stderr[-300:]
++        b = json.loads(out.read_text())
++        assert b["base"]["attention_backend"] == "manual"
++        assert b["hla"]["attention_backend"] == "sdpa_fold"
++        assert "torch_version" in b["base"]
++
++    def test_bench_pallas_on_cpu_fails_loud(self, tmp_path):
++        import subprocess, sys, os
++        try:
++            import torch_xla  # noqa: F401
++            import pytest
++            pytest.skip("torch_xla present")
++        except ImportError:
++            pass
++        m = self._cfg(tmp_path, "m")
++        p = self._cfg(tmp_path, "p", phase_mult=0.15,
++                      use_distance_laplace=True, distance_laplace_alpha=0.5,
++                      attention_backend="pallas")
++        r = subprocess.run([sys.executable,
++                            os.path.join(ROOT, "scripts", "bench.py"),
++                            "--base", m, "--hla", p, "--steps", "1",
++                            "--batch", "1", "--seq-len", "64"],
++                           capture_output=True, text=True, cwd=ROOT)
++        assert r.returncode != 0
++        assert "torch_xla" in r.stderr
++
++
++class TestFigureCoverageGuard:
++    """Regression #34 (attack I2): with multi-session autoresume runs a
++    tail-only CSV (single resume-session log) passed against a full log
++    used to produce a silently-wrong figure (curves covering different
++    token ranges). fig1/fig2/fig5 must refuse loudly; the legit fix -
++    concatenated session CSVs (read_log keep-last seam handling, #14) -
++    must still draw."""
++
++    def _mk(self, tmp_path, name, lo, hi):
++        hdr = "step,tokens_seen,lr,train_loss,val_loss\n"
++        rows = [f"{s},{s*262144},0.0003,{4.0-s*1e-5:.6f},"
++                f"{(f'{5.0-s*1e-4:.6f}' if s % 500 == 0 else 'nan')}\n"
++                for s in range(lo, hi + 1, 50)]
++        p = tmp_path / f"{name}.csv"
++        p.write_text(hdr + "".join(rows))
++        return str(p)
++
++    def _mpf(self):
++        import importlib.util, os
++        pytest.importorskip("matplotlib")
++        spec = importlib.util.spec_from_file_location(
++            "mpf", os.path.join(ROOT, "scripts", "make_paper_figures.py"))
++        m = importlib.util.module_from_spec(spec)
++        spec.loader.exec_module(m)
++        return m
++
++    def test_tail_only_log_refused_loud(self, tmp_path):
++        mpf = self._mpf()
++        full = self._mk(tmp_path, "full", 50, 15000)
++        tail = self._mk(tmp_path, "tail", 10550, 15000)
++        with pytest.raises(SystemExit, match="coverage mismatch"):
++            mpf.fig1_twin_divergence(full, tail, str(tmp_path / "f.png"))
++
++    def test_concatenated_sessions_accepted(self, tmp_path):
++        import os
++        mpf = self._mpf()
++        full = self._mk(tmp_path, "full2", 50, 15000)
++        s1 = open(self._mk(tmp_path, "s1", 50, 10700)).read()
++        s2 = open(self._mk(tmp_path, "s2", 10550, 15000)).read()
++        cat = tmp_path / "cat.csv"
++        cat.write_text(s1 + s2)  # includes mid-file header: read_log handles
++        out = tmp_path / "ok.png"
++        mpf.fig1_twin_divergence(full, str(cat), str(out))
++        assert os.path.exists(out)
+diff --git a/tests/test_eval.py b/tests/test_eval.py
+index 20229df..5145919 100644
+--- a/tests/test_eval.py
++++ b/tests/test_eval.py
+@@ -767,7 +767,7 @@ class TestCausalPatch:
+         fr = {"induction": 0.9}
+         rec = cp.gap_closure(base, hla, fr)["induction"]
+         assert rec["closure"] != rec["closure"]          # NaN
+-        assert rec.get("closure_note") == 1.0
++        assert rec.get("gap_too_small") == 1.0
+ 
+     def test_gap_closure_math(self):
+         cp, _, _ = self._pair()
+@@ -1646,3 +1646,135 @@ class TestNonFiniteCheckpointGuards:
+                            capture_output=True, text=True)
+         assert r.returncode != 0
+         assert "non-finite" in (r.stdout + r.stderr)
++
++
++class TestAnalysisPinsManualBackend:
++    """Regression #32 (attack G1): every analysis entry point (causal_patch,
++    train_probe, eval_passkey, analyze_checkpoint) must pin
++    attention_backend='manual' regardless of what the config declares.
++    Otherwise: 'pallas' configs crash H5 on CPU (no torch_xla), 'sdpa_fold'
++    configs shift probe statistics by reduction order (~1e-7) making
++    H5 numbers depend on an irrelevant training-speed choice. Executed
++    finding: pallas config crashed causal_patch with ModuleNotFoundError;
++    after the fix all three declared backends produce IDENTICAL H5 JSON."""
++
++    def test_all_four_scripts_pin_manual(self):
++        import os
++        for script in ["causal_patch.py", "train_probe.py",
++                       "eval_passkey.py", "analyze_checkpoint.py"]:
++            src = open(os.path.join(ROOT, "scripts", script)).read()
++            assert 'attention_backend' in src and '"manual"' in src, script
++            assert "FIX #32" in src, f"{script} lost the #32 pin"
++
++
++class TestH5ArtifactStrictJson:
++    """Regression #40 (attack N): the H5 JSON is a PUBLISHED paper artifact.
++    float("inf")/NaN serialize as Infinity/NaN literals -> invalid JSON per
++    RFC 8259 (rejected by jq, browsers, strict parsers). causal_patch,
++    analyze_checkpoint and profile_flops must emit strictly valid JSON
++    (NaN/Inf -> null; noise==0 -> finite sentinel + noise_exact_zero flag)."""
++
++    def test_causal_patch_json_strictly_valid(self, tmp_path):
++        import json, subprocess, sys, os, torch
++        from src.model import GPT, GPTConfig
++        kw = dict(block_size=64, vocab_size=256, padded_vocab_size=256,
++                  n_layer=1, n_head=2, n_embd=32, gradient_checkpointing=False)
++        hla_kw = dict(kw, phase_mult=0.15, use_laplace=True, laplace_alpha=1.0,
++                      use_distance_laplace=True, distance_laplace_alpha=0.5)
++        torch.manual_seed(0)
++        torch.save({"model": GPT(GPTConfig(**kw)).state_dict()},
++                   tmp_path / "b.pt")
++        torch.save({"model": GPT(GPTConfig(**hla_kw)).state_dict()},
++                   tmp_path / "h.pt")
++        (tmp_path / "c.json").write_text(json.dumps({"model": hla_kw}))
++        r = subprocess.run(
++            [sys.executable, os.path.join(ROOT, "scripts", "causal_patch.py"),
++             "--base-checkpoint", str(tmp_path / "b.pt"),
++             "--hla-checkpoint", str(tmp_path / "h.pt"),
++             "--hla-config", str(tmp_path / "c.json"),
++             "--direction", "forward", "--probe-seeds", "1",
++             "--out", str(tmp_path / "o.json")],
++            capture_output=True, text=True, cwd=ROOT)
++        assert r.returncode == 0, r.stderr[-300:]
++        txt = (tmp_path / "o.json").read_text()
++        # strict parse: any NaN/Infinity literal raises
++        json.loads(txt, parse_constant=lambda c: (_ for _ in ()).throw(
++            ValueError(f"non-finite literal {c} in artifact")))
++
++
++class TestFrankenReverseAndGuards:
++    """Attack round P (pre-H5): the reverse arm feeds half the H5 verdict.
++    P2: reverse is the exact mirror (QK+mechanisms from base, V/MLP kept).
++    P3: identical twins -> franken_rev == body bit-exact. P4: inputs never
++    mutated. #41/P5: unknown transplant name must raise, not silently
++    degrade to qk-only (a typo would produce a valid-looking wrong arm)."""
++
++    def _pair(self):
++        base = {"h.attn.c_attn.weight": torch.zeros(6, 2),
++                "h.attn.W_phase_q": torch.zeros(2),
++                "h.attn.W_gate_d.weight": torch.zeros(2),
++                "h.mlp.w": torch.zeros(2)}
++        hla = {k: torch.ones_like(v) for k, v in base.items()}
++        return base, hla
++
++    def _cp(self):
++        import importlib.util, os
++        spec = importlib.util.spec_from_file_location(
++            "cp_mod", os.path.join(ROOT, "scripts", "causal_patch.py"))
++        m = importlib.util.module_from_spec(spec)
++        spec.loader.exec_module(m)
++        return m
++
++    def test_reverse_exact_mirror(self):
++        cp = self._cp(); base, hla = self._pair()
++        out = cp.build_franken(base, hla, 2, "retrieval", donor="base")
++        assert out["h.attn.c_attn.weight"][:4].sum() == 0      # QK <- base
++        assert out["h.attn.c_attn.weight"][4:].mean() == 1     # V  <- HLA
++        assert out["h.attn.W_phase_q"].sum() == 0              # mech <- base
++        assert out["h.mlp.w"].mean() == 1                      # MLP  <- HLA
++
++    def test_identical_twins_reverse_is_identity(self):
++        cp = self._cp()
++        same = {k: torch.full_like(v, 0.5) for k, v in self._pair()[0].items()}
++        out = cp.build_franken(same, same, 2, "retrieval", donor="base")
++        assert all(torch.equal(out[k], same[k]) for k in same)
++
++    def test_inputs_not_mutated(self):
++        cp = self._cp(); base, hla = self._pair()
++        before = hla["h.attn.c_attn.weight"].clone()
++        cp.build_franken(base, hla, 2, "retrieval", donor="hla")
++        cp.build_franken(base, hla, 2, "retrieval", donor="base")
++        assert torch.equal(before, hla["h.attn.c_attn.weight"])
++        assert base["h.attn.c_attn.weight"].sum() == 0
++
++    def test_unknown_transplant_raises(self):
++        import pytest
++        cp = self._cp(); base, hla = self._pair()
++        with pytest.raises(ValueError, match="transplant"):
++            cp.build_franken(base, hla, 2, "attention", donor="hla")
++
++
++class TestTrainProbeCliRobustness:
++    """Regression #42 (attack R2): the CLI crashed with TypeError when
++    run_probe took an early-return path (vocab/block too small) - AFTER
++    writing valid JSON, so orchestration saw rc=1 with a good artifact.
++    The CLI must exit 0 and print a defensive summary on partial results."""
++
++    def test_early_return_path_exits_zero(self, tmp_path):
++        import json, subprocess, sys, os, torch
++        from src.model import GPT, GPTConfig
++        kw = dict(block_size=64, vocab_size=256, padded_vocab_size=256,
++                  n_layer=1, n_head=2, n_embd=32, gradient_checkpointing=False)
++        torch.manual_seed(0)
++        torch.save({"model": GPT(GPTConfig(**kw)).state_dict()},
++                   tmp_path / "c.pt")
++        (tmp_path / "c.json").write_text(json.dumps({"model": kw}))
++        r = subprocess.run(
++            [sys.executable, os.path.join(ROOT, "scripts", "train_probe.py"),
++             "--checkpoint", str(tmp_path / "c.pt"),
++             "--config", str(tmp_path / "c.json"),
++             "--out", str(tmp_path / "o.json")],
++            capture_output=True, text=True, cwd=ROOT)
++        assert r.returncode == 0, r.stderr[-300:]
++        assert "partial result" in r.stdout
++        assert (tmp_path / "o.json").exists()
+diff --git a/tests/test_mini_speed_matrix.py b/tests/test_mini_speed_matrix.py
+new file mode 100644
+index 0000000..b62f24f
+--- /dev/null
++++ b/tests/test_mini_speed_matrix.py
+@@ -0,0 +1,68 @@
++# Copyright 2026 Slyatski Ilya
++"""Round 79: mini 124M-class (gpt2-small) speed-smoke matrix contract (BD/BF).
++
++Mini configs let anyone (incl. top labs) validate a backend in minutes
++before committing to full runs. Contract: tiny arch is IDENTICAL across
++the matrix except attention_backend; mechanisms stay ON for hla variants;
++GPU minis must not point into /kaggle.
++"""
++import glob
++import json
++
++MINIS = sorted(glob.glob("configs/mini_124m_*.json") +
++               glob.glob("configs/gpu_mini_124m_*.json"))
++ARCH_KEYS = ("n_embd", "n_layer", "n_head", "block_size", "vocab_size")
++
++class TestMiniSpeedMatrix:
++    def test_matrix_present(self):
++        names = {p.split("/")[-1] for p in MINIS}
++        assert names == {
++            "mini_124m_base_sdpa_s42.json",
++            "mini_124m_hla_fold_s42.json",
++            "mini_124m_hla_pallas_s42.json",
++            "gpu_mini_124m_base_flash_s42.json",
++            "gpu_mini_124m_hla_flash_fold_s42.json",
++        }
++
++    def test_arch_is_gpt2_small_class(self):
++        for p in MINIS:
++            c = json.load(open(p))["model"]
++            assert (c["n_embd"], c["n_layer"], c["n_head"]) == (768, 12, 12), p
++
++    def test_arch_identical_across_matrix(self):
++        cfgs = [json.load(open(p))["model"] for p in MINIS]
++        ref = {k: cfgs[0][k] for k in ARCH_KEYS}
++        for c in cfgs[1:]:
++            assert {k: c[k] for k in ARCH_KEYS} == ref
++
++    def test_backends_correct(self):
++        for p in MINIS:
++            c = json.load(open(p))["model"]
++            name = p.split("/")[-1]
++            if "pallas" in name:
++                assert c["attention_backend"] == "pallas"
++            elif "fold" in name:
++                assert c["attention_backend"] == "sdpa_fold"
++            else:
++                assert c["attention_backend"] == "sdpa"
++
++    def test_hla_mechanisms_on_base_off(self):
++        for p in MINIS:
++            c = json.load(open(p))["model"]
++            if "hla" in p.split("/")[-1]:
++                assert c["laplace_alpha"] == 1.0 and c["phase_mult"] > 0
++            else:
++                assert c["laplace_alpha"] == 0.0 and c["phase_mult"] == 0.0
++
++    def test_gpu_minis_use_local_paths(self):
++        for p in MINIS:
++            if "gpu_" not in p:
++                continue
++            c = json.load(open(p))
++            for key in ("save_dir", "train_path", "val_path"):
++                assert not str(c[key]).startswith("/kaggle"), (p, key)
++
++    def test_smoke_budget_small(self):
++        for p in MINIS:
++            c = json.load(open(p))
++            assert c["max_steps"] <= 500 and c["resume_every"] == 0
+diff --git a/tests/test_model.py b/tests/test_model.py
+index 0991d68..a01b4a9 100644
+--- a/tests/test_model.py
++++ b/tests/test_model.py
+@@ -1448,3 +1448,322 @@ class TestDistanceRank1FastPath:
+         ref = dist[None, None] * cg.unsqueeze(2)
+         causal = torch.tril(torch.ones(T, T, dtype=torch.bool))
+         assert ((fast - ref).abs() * causal).max().item() < 1e-6
++
++
++class TestSdpaFoldBackend:
++    """Finding #30: rank-1/per-key additive biases fold INTO the qk dot
++    product via augmented head dims, making the SDPA/flash kernel legal for
++    HLA. V8 measured the exact manual path at ~94k tok/s vs 152k base: the
++    dominant cost is materializing att itself. The fold backend removes every
++    (B,H,T,T) materialization. Float diff vs manual is reduction-order only.
++    NOT the science-pair backend (that stays manual & bit-exact)."""
++
++    HLA = dict(block_size=64, vocab_size=256, n_layer=2, n_head=2, n_embd=32,
++               gradient_checkpointing=False, phase_mult=0.15, use_laplace=True,
++               laplace_alpha=1.0, use_distance_laplace=True,
++               distance_laplace_alpha=0.5, distance_laplace_range=1.0,
++               distance_laplace_clip=1.0, use_salience_bias=True,
++               salience_alpha=1.0, salience_range=1.0, salience_clip=2.0)
++
++    def _pair(self):
++        torch.manual_seed(7)
++        man = GPT(small_cfg(**self.HLA, attention_backend="manual"))
++        with torch.no_grad():
++            for b in man.transformer.h:
++                b.attn.W_gate_d.weight.normal_(0, 0.6)
++                b.attn.W_gate_sal.weight.normal_(0, 0.6)
++        fold = GPT(small_cfg(**self.HLA, attention_backend="sdpa_fold"))
++        fold.load_state_dict(man.state_dict())
++        g = torch.Generator(); g.manual_seed(3)
++        x = torch.randint(0, 256, (2, 64), generator=g)
++        return man, fold, x
++
++    def test_logits_match_manual_with_live_gates(self):
++        man, fold, x = self._pair()
++        man.eval(); fold.eval()
++        with torch.no_grad():
++            lm, _ = man(x); lf, _ = fold(x)
++        assert (lm - lf).abs().max().item() < 5e-5
++
++    def test_grads_match_manual(self):
++        man, fold, x = self._pair()
++        _, l1 = man(x, x); l1.backward()
++        _, l2 = fold(x, x); l2.backward()
++        assert abs(l1.item() - l2.item()) < 5e-6
++        gm = {n: p.grad for n, p in man.named_parameters() if p.grad is not None}
++        mx = max((p.grad - gm[n]).abs().max().item()
++                 for n, p in fold.named_parameters()
++                 if p.grad is not None and n in gm)
++        assert mx < 5e-5
++
++    def test_binding_clip_refuses_fold(self):
++        """|alpha*range| > clip => clamp can be active => fold is NOT exact
++        => must fall back to the exact manual path (same #29 guard logic)."""
++        kw = dict(self.HLA, distance_laplace_alpha=2.0)
++        torch.manual_seed(0)
++        m = GPT(small_cfg(**kw, attention_backend="sdpa_fold")).eval()
++        with torch.no_grad():
++            for b in m.transformer.h:
++                b.attn.W_gate_d.weight.fill_(100.0)
++        m2 = GPT(small_cfg(**kw, attention_backend="manual")).eval()
++        m2.load_state_dict(m.state_dict())
++        g = torch.Generator(); g.manual_seed(3)
++        x = torch.randint(0, 256, (1, 64), generator=g)
++        with torch.no_grad():
++            lf, _ = m(x); lm, _ = m2(x)
++        # fold_ok is False -> both take the manual clamped path -> identical
++        assert torch.equal(lf, lm)
++
++    def test_diagnostics_force_manual_path(self):
++        man, fold, x = self._pair()
++        fold.set_diagnostics(enabled=True)
++        man.set_diagnostics(enabled=True)
++        fold.eval(); man.eval()
++        with torch.no_grad():
++            lf, _ = fold(x); lm, _ = man(x)
++        assert torch.equal(lf, lm)  # both manual now: bit-exact
++        blk = fold.transformer.h[0].attn
++        assert blk.last_distance_bias_abs_mean is not None
++
++
++class TestPallasBackend:
++    """#30b: the "pallas" backend feeds the SAME folded q'/k' into the
++    torch_xla Pallas flash-attention kernel. On CPU (no torch_xla) it must
++    fail LOUD, never silently fall back - silent fallback would fake speed
++    numbers. Math is shared with sdpa_fold (tested above), so CPU tests here
++    pin config plumbing + loud failure only; the kernel itself is TPU-smoke."""
++
++    HLA = dict(block_size=64, vocab_size=256, n_layer=1, n_head=2, n_embd=32,
++               gradient_checkpointing=False, phase_mult=0.15, use_laplace=True,
++               laplace_alpha=1.0, use_distance_laplace=True,
++               distance_laplace_alpha=0.5, use_salience_bias=True,
++               salience_alpha=1.0)
++
++    def test_config_accepts_pallas(self):
++        cfg = small_cfg(**self.HLA, attention_backend="pallas")
++        assert cfg.attention_backend == "pallas"
++
++    def test_bad_backend_still_rejected(self):
++        with pytest.raises(ValueError):
++            small_cfg(**self.HLA, attention_backend="triton")
++
++    def test_pallas_without_torch_xla_fails_loud(self):
++        pytest.importorskip is not None
++        try:
++            import torch_xla  # noqa: F401
++            pytest.skip("torch_xla present; kernel path exercised on TPU")
++        except ImportError:
++            pass
++        torch.manual_seed(0)
++        m = GPT(small_cfg(**self.HLA, attention_backend="pallas"))
++        with torch.no_grad():
++            for b in m.transformer.h:
++                b.attn.W_gate_d.weight.normal_(0, 0.5)
++        x = torch.randint(0, 256, (1, 64))
++        with pytest.raises(ImportError):
++            m(x)
++
++    def test_pallas_with_diagnostics_uses_manual_bit_exact(self):
++        torch.manual_seed(0)
++        m = GPT(small_cfg(**self.HLA, attention_backend="pallas"))
++        with torch.no_grad():
++            for b in m.transformer.h:
++                b.attn.W_gate_d.weight.normal_(0, 0.5)
++        m2 = GPT(small_cfg(**self.HLA, attention_backend="manual"))
++        m2.load_state_dict(m.state_dict())
++        m.set_diagnostics(enabled=True); m2.set_diagnostics(enabled=True)
++        m.eval(); m2.eval()
++        x = torch.randint(0, 256, (1, 64))
++        with torch.no_grad():
++            l1, _ = m(x); l2, _ = m2(x)
++        assert torch.equal(l1, l2)
++
++
++class TestSpeedBackendPanelRegressions:
++    """Adversarial panel round on #30/#30b, executed attacks locked as tests:
++    bf16 numerics, T < block_size prefix stability, ALL mechanisms live
++    together, empty-extras degenerate path."""
++
++    HLA = dict(block_size=64, vocab_size=256, n_layer=1, n_head=2, n_embd=64,
++               gradient_checkpointing=False, phase_mult=0.15, use_laplace=True,
++               laplace_alpha=1.0, use_distance_laplace=True,
++               distance_laplace_alpha=0.5, use_salience_bias=True,
++               salience_alpha=1.0)
++
++    def _pair(self, **extra):
++        torch.manual_seed(0)
++        man = GPT(small_cfg(**dict(self.HLA, **extra), attention_backend="manual"))
++        with torch.no_grad():
++            for b in man.transformer.h:
++                b.attn.W_gate_d.weight.normal_(0, 0.6)
++                b.attn.W_gate_sal.weight.normal_(0, 0.6)
++        fold = GPT(small_cfg(**dict(self.HLA, **extra), attention_backend="sdpa_fold"))
++        fold.load_state_dict(man.state_dict())
++        return man.eval(), fold.eval()
++
++    def test_bf16_matches_at_bf16_noise_scale(self):
++        man, fold = self._pair()
++        x = torch.randint(0, 256, (1, 64))
++        with torch.no_grad():
++            lm, _ = man.to(torch.bfloat16)(x)
++            lf, _ = fold.to(torch.bfloat16)(x)
++        assert (lm.float() - lf.float()).abs().max().item() < 0.15
++
++    def test_short_sequence_prefix_stable(self):
++        man, fold = self._pair()
++        x = torch.randint(0, 256, (1, 17))
++        with torch.no_grad():
++            lm, _ = man(x); lf, _ = fold(x)
++        assert (lm - lf).abs().max().item() < 5e-5
++
++    def test_all_mechanisms_live_together(self):
++        man, fold = self._pair(use_qtemp=True, qtemp_alpha=0.5, n_layer=2)
++        x = torch.randint(0, 256, (2, 64))
++        with torch.no_grad():
++            lm, _ = man(x); lf, _ = fold(x)
++        assert (lm - lf).abs().max().item() < 5e-5
++
++    def test_empty_extras_equals_plain_sdpa_bitexact(self):
++        kw = dict(block_size=64, vocab_size=256, n_layer=1, n_head=2,
++                  n_embd=64, gradient_checkpointing=False)
++        torch.manual_seed(2)
++        f = GPT(small_cfg(**kw, attention_backend="sdpa_fold")).eval()
++        s = GPT(small_cfg(**kw, attention_backend="sdpa")).eval()
++        s.load_state_dict(f.state_dict())
++        x = torch.randint(0, 256, (1, 64))
++        with torch.no_grad():
++            l1, _ = f(x); l2, _ = s(x)
++        assert torch.equal(l1, l2)
++
++
++class TestSpeedBackendAdvancedInteractions:
++    """Attack round F (advanced-feature interactions with the fold backend),
++    all executed before locking: learnable layer temperature flowing into the
++    fold coefficient, gradient checkpointing recompute path, fp64 casts,
++    and state_dict round-trip between backends."""
++
++    BASE = dict(block_size=64, vocab_size=256, n_layer=2, n_head=2, n_embd=64,
++                gradient_checkpointing=False, phase_mult=0.15, use_laplace=True,
++                laplace_alpha=1.0, use_distance_laplace=True,
++                distance_laplace_alpha=0.5, use_salience_bias=True,
++                salience_alpha=1.0)
++
++    def _pair(self, **extra):
++        torch.manual_seed(3)
++        man = GPT(small_cfg(**dict(self.BASE, **extra),
++                            attention_backend="manual"))
++        with torch.no_grad():
++            for b in man.transformer.h:
++                b.attn.W_gate_d.weight.normal_(0, 0.6)
++                b.attn.W_gate_sal.weight.normal_(0, 0.6)
++                if extra.get("learnable_layer_temp"):
++                    b.attn.W_layer_temp.fill_(0.37)
++        fold = GPT(small_cfg(**dict(self.BASE, **extra),
++                             attention_backend="sdpa_fold"))
++        fold.load_state_dict(man.state_dict())
++        x = torch.randint(0, 256, (2, 64))
++        return man, fold, x
++
++    def test_learnable_layer_temp_flows_into_fold_coef(self):
++        man, fold, x = self._pair(layer_dependent_gate=True,
++                                  learnable_layer_temp=True)
++        man.eval(); fold.eval()
++        with torch.no_grad():
++            lm, _ = man(x); lf, _ = fold(x)
++        assert (lm - lf).abs().max().item() < 5e-5
++
++    def test_gradient_checkpointing_recompute_matches(self):
++        man, fold, x = self._pair(gradient_checkpointing=True)
++        _, l1 = man(x, x); l1.backward()
++        _, l2 = fold(x, x); l2.backward()
++        assert abs(l1.item() - l2.item()) < 5e-6
++        gm = {n: p.grad for n, p in man.named_parameters()
++              if p.grad is not None}
++        mx = max((p.grad - gm[n]).abs().max().item()
++                 for n, p in fold.named_parameters()
++                 if p.grad is not None and n in gm)
++        assert mx < 5e-5
++
++    def test_fp64_consistency(self):
++        man, fold, x = self._pair()
++        m64 = man.double().eval(); f64 = fold.double().eval()
++        with torch.no_grad():
++            lm, _ = m64(x); lf, _ = f64(x)
++        assert (lm - lf).abs().max().item() < 1e-6
++
++    def test_state_dict_round_trip_bit_exact(self):
++        man, fold, x = self._pair()
++        man2 = GPT(small_cfg(**self.BASE, attention_backend="manual"))
++        man2.load_state_dict(fold.state_dict())
++        man.eval(); man2.eval()
++        with torch.no_grad():
++            a, _ = man(x); b, _ = man2(x)
++        assert torch.equal(a, b)
++
++
++class TestPortRecipeLiteral:
++    """Attack round J (adopter copy-paste): the docs/SPEED_BACKENDS.md fold
++    recipe, implemented LITERALLY from the doc text, must reproduce the
++    implementation's augmented q'/k' bit-exactly and the end-to-end logits
++    to float tolerance. #35: layer_mult was used in the recipe but never
++    defined - fixed in the doc; this test pins the recipe/implementation
++    contract so doc drift fails CI."""
++
++    def test_doc_recipe_matches_implementation(self):
++        import math
++        import torch.nn.functional as F
++        cfg = small_cfg(block_size=64, vocab_size=256, n_layer=1, n_head=2,
++                        n_embd=64, gradient_checkpointing=False,
++                        phase_mult=0.15, use_laplace=True, laplace_alpha=1.0,
++                        use_distance_laplace=True, distance_laplace_alpha=0.5,
++                        use_salience_bias=True, salience_alpha=1.0,
++                        attention_backend="sdpa_fold")
++        torch.manual_seed(0)
++        m = GPT(cfg).eval()
++        with torch.no_grad():
++            for b in m.transformer.h:
++                b.attn.W_gate_d.weight.normal_(0, 0.6)
++                b.attn.W_gate_sal.weight.normal_(0, 0.6)
++        attn = m.transformer.h[0].attn
++        acts, qkv = {}, {}
++        hh = attn.register_forward_pre_hook(
++            lambda mod, args: acts.__setitem__("x", args[0].detach()))
++        orig = F.scaled_dot_product_attention
++
++        def spy(q, k, v, **kw):
++            qkv.setdefault("q", q.detach()); qkv.setdefault("k", k.detach())
++            qkv.setdefault("scale", kw.get("scale"))
++            return orig(q, k, v, **kw)
++
++        F.scaled_dot_product_attention = spy
++        try:
++            with torch.no_grad():
++                m(torch.randint(0, 256, (1, 64)))
++        finally:
++            F.scaled_dot_product_attention = orig
++            hh.remove()
++        x = acts["x"]; B, T, C = x.shape
++        H, d = attn.n_head, C // attn.n_head
++        sd = math.sqrt(d)
++        assert abs(qkv["scale"] - 1.0 / sd) < 1e-12  # explicit 1/sqrt(d)
++        p = torch.arange(T).float() / (cfg.block_size - 1)
++        lm = attn.layer_gate_multiplier
++        c = (0.5 * 1.0 * lm) * torch.tanh(attn.W_gate_d(x)).float()
++        s = torch.tanh(attn.W_gate_sal(x)).float()
++        cg, sal = c.transpose(1, 2), s.transpose(1, 2)
++        qf, kf = qkv["q"], qkv["k"]
++        q_doc = torch.cat([qf[..., :d],
++                           (sd * p).view(1, 1, T, 1).expand(B, H, T, 1),
++                           torch.full((B, H, T, 1), sd),
++                           torch.full((B, H, T, 1), sd)], dim=-1)
++        k_doc = torch.cat([kf[..., :d], cg.unsqueeze(-1),
++                           (-p.view(1, 1, T) * cg).unsqueeze(-1),
++                           sal.unsqueeze(-1)], dim=-1)
++        assert torch.equal(q_doc, qf)
++        assert torch.equal(k_doc, kf)
++
++    def test_doc_defines_layer_mult(self):
++        import os
++        doc = open(os.path.join(os.path.dirname(os.path.dirname(
++            os.path.abspath(__file__))), "docs", "SPEED_BACKENDS.md")).read()
++        assert "layer_mult = 1.0" in doc  # #35: recipe must define it
