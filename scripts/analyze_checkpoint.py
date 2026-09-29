@@ -33,6 +33,17 @@ from src.data import FixedDataset  # noqa: E402
 from src.model import GPT, GPTConfig  # noqa: E402
 
 
+def _clean_json40(o):
+    """FIX #40: NaN/Infinity are invalid JSON (RFC 8259); emit null."""
+    if isinstance(o, dict):
+        return {k: _clean_json40(v) for k, v in o.items()}
+    if isinstance(o, list):
+        return [_clean_json40(v) for v in o]
+    if isinstance(o, float) and (o != o or o in (float("inf"), float("-inf"))):
+        return None
+    return o
+
+
 def load_json(path: str) -> Dict[str, Any]:
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
@@ -64,6 +75,9 @@ def load_checkpoint_model(ckpt_path: str, config_path: str | None, device: str) 
     else:
         raise ValueError("Provide --config when checkpoint has no embedded config")
     state = payload["model"] if isinstance(payload, dict) and "model" in payload else payload
+        # FIX #32 (attack G1): analysis must be bit-exact and CPU-runnable;
+    # speed configs may declare sdpa_fold/pallas. Pin manual for analysis.
+    cfg["model"] = dict(cfg["model"], attention_backend="manual")
     model = GPT(GPTConfig(**cfg["model"]))
     model.load_state_dict(state, strict=True)
     model.to(device)
@@ -385,7 +399,7 @@ def main() -> None:
 
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     with open(args.out, "w", encoding="utf-8") as f:
-        json.dump(result, f, indent=2, sort_keys=True)
+        json.dump(_clean_json40(result), f, indent=2, sort_keys=True)
     print(f"wrote {args.out}")
 
 

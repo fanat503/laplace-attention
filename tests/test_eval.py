@@ -767,7 +767,7 @@ class TestCausalPatch:
         fr = {"induction": 0.9}
         rec = cp.gap_closure(base, hla, fr)["induction"]
         assert rec["closure"] != rec["closure"]          # NaN
-        assert rec.get("closure_note") == 1.0
+        assert rec.get("gap_too_small") == 1.0
 
     def test_gap_closure_math(self):
         cp, _, _ = self._pair()
@@ -1646,3 +1646,135 @@ class TestNonFiniteCheckpointGuards:
                            capture_output=True, text=True)
         assert r.returncode != 0
         assert "non-finite" in (r.stdout + r.stderr)
+
+
+class TestAnalysisPinsManualBackend:
+    """Regression #32 (attack G1): every analysis entry point (causal_patch,
+    train_probe, eval_passkey, analyze_checkpoint) must pin
+    attention_backend='manual' regardless of what the config declares.
+    Otherwise: 'pallas' configs crash H5 on CPU (no torch_xla), 'sdpa_fold'
+    configs shift probe statistics by reduction order (~1e-7) making
+    H5 numbers depend on an irrelevant training-speed choice. Executed
+    finding: pallas config crashed causal_patch with ModuleNotFoundError;
+    after the fix all three declared backends produce IDENTICAL H5 JSON."""
+
+    def test_all_four_scripts_pin_manual(self):
+        import os
+        for script in ["causal_patch.py", "train_probe.py",
+                       "eval_passkey.py", "analyze_checkpoint.py"]:
+            src = open(os.path.join(ROOT, "scripts", script)).read()
+            assert 'attention_backend' in src and '"manual"' in src, script
+            assert "FIX #32" in src, f"{script} lost the #32 pin"
+
+
+class TestH5ArtifactStrictJson:
+    """Regression #40 (attack N): the H5 JSON is a PUBLISHED paper artifact.
+    float("inf")/NaN serialize as Infinity/NaN literals -> invalid JSON per
+    RFC 8259 (rejected by jq, browsers, strict parsers). causal_patch,
+    analyze_checkpoint and profile_flops must emit strictly valid JSON
+    (NaN/Inf -> null; noise==0 -> finite sentinel + noise_exact_zero flag)."""
+
+    def test_causal_patch_json_strictly_valid(self, tmp_path):
+        import json, subprocess, sys, os, torch
+        from src.model import GPT, GPTConfig
+        kw = dict(block_size=64, vocab_size=256, padded_vocab_size=256,
+                  n_layer=1, n_head=2, n_embd=32, gradient_checkpointing=False)
+        hla_kw = dict(kw, phase_mult=0.15, use_laplace=True, laplace_alpha=1.0,
+                      use_distance_laplace=True, distance_laplace_alpha=0.5)
+        torch.manual_seed(0)
+        torch.save({"model": GPT(GPTConfig(**kw)).state_dict()},
+                   tmp_path / "b.pt")
+        torch.save({"model": GPT(GPTConfig(**hla_kw)).state_dict()},
+                   tmp_path / "h.pt")
+        (tmp_path / "c.json").write_text(json.dumps({"model": hla_kw}))
+        r = subprocess.run(
+            [sys.executable, os.path.join(ROOT, "scripts", "causal_patch.py"),
+             "--base-checkpoint", str(tmp_path / "b.pt"),
+             "--hla-checkpoint", str(tmp_path / "h.pt"),
+             "--hla-config", str(tmp_path / "c.json"),
+             "--direction", "forward", "--probe-seeds", "1",
+             "--out", str(tmp_path / "o.json")],
+            capture_output=True, text=True, cwd=ROOT)
+        assert r.returncode == 0, r.stderr[-300:]
+        txt = (tmp_path / "o.json").read_text()
+        # strict parse: any NaN/Infinity literal raises
+        json.loads(txt, parse_constant=lambda c: (_ for _ in ()).throw(
+            ValueError(f"non-finite literal {c} in artifact")))
+
+
+class TestFrankenReverseAndGuards:
+    """Attack round P (pre-H5): the reverse arm feeds half the H5 verdict.
+    P2: reverse is the exact mirror (QK+mechanisms from base, V/MLP kept).
+    P3: identical twins -> franken_rev == body bit-exact. P4: inputs never
+    mutated. #41/P5: unknown transplant name must raise, not silently
+    degrade to qk-only (a typo would produce a valid-looking wrong arm)."""
+
+    def _pair(self):
+        base = {"h.attn.c_attn.weight": torch.zeros(6, 2),
+                "h.attn.W_phase_q": torch.zeros(2),
+                "h.attn.W_gate_d.weight": torch.zeros(2),
+                "h.mlp.w": torch.zeros(2)}
+        hla = {k: torch.ones_like(v) for k, v in base.items()}
+        return base, hla
+
+    def _cp(self):
+        import importlib.util, os
+        spec = importlib.util.spec_from_file_location(
+            "cp_mod", os.path.join(ROOT, "scripts", "causal_patch.py"))
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        return m
+
+    def test_reverse_exact_mirror(self):
+        cp = self._cp(); base, hla = self._pair()
+        out = cp.build_franken(base, hla, 2, "retrieval", donor="base")
+        assert out["h.attn.c_attn.weight"][:4].sum() == 0      # QK <- base
+        assert out["h.attn.c_attn.weight"][4:].mean() == 1     # V  <- HLA
+        assert out["h.attn.W_phase_q"].sum() == 0              # mech <- base
+        assert out["h.mlp.w"].mean() == 1                      # MLP  <- HLA
+
+    def test_identical_twins_reverse_is_identity(self):
+        cp = self._cp()
+        same = {k: torch.full_like(v, 0.5) for k, v in self._pair()[0].items()}
+        out = cp.build_franken(same, same, 2, "retrieval", donor="base")
+        assert all(torch.equal(out[k], same[k]) for k in same)
+
+    def test_inputs_not_mutated(self):
+        cp = self._cp(); base, hla = self._pair()
+        before = hla["h.attn.c_attn.weight"].clone()
+        cp.build_franken(base, hla, 2, "retrieval", donor="hla")
+        cp.build_franken(base, hla, 2, "retrieval", donor="base")
+        assert torch.equal(before, hla["h.attn.c_attn.weight"])
+        assert base["h.attn.c_attn.weight"].sum() == 0
+
+    def test_unknown_transplant_raises(self):
+        import pytest
+        cp = self._cp(); base, hla = self._pair()
+        with pytest.raises(ValueError, match="transplant"):
+            cp.build_franken(base, hla, 2, "attention", donor="hla")
+
+
+class TestTrainProbeCliRobustness:
+    """Regression #42 (attack R2): the CLI crashed with TypeError when
+    run_probe took an early-return path (vocab/block too small) - AFTER
+    writing valid JSON, so orchestration saw rc=1 with a good artifact.
+    The CLI must exit 0 and print a defensive summary on partial results."""
+
+    def test_early_return_path_exits_zero(self, tmp_path):
+        import json, subprocess, sys, os, torch
+        from src.model import GPT, GPTConfig
+        kw = dict(block_size=64, vocab_size=256, padded_vocab_size=256,
+                  n_layer=1, n_head=2, n_embd=32, gradient_checkpointing=False)
+        torch.manual_seed(0)
+        torch.save({"model": GPT(GPTConfig(**kw)).state_dict()},
+                   tmp_path / "c.pt")
+        (tmp_path / "c.json").write_text(json.dumps({"model": kw}))
+        r = subprocess.run(
+            [sys.executable, os.path.join(ROOT, "scripts", "train_probe.py"),
+             "--checkpoint", str(tmp_path / "c.pt"),
+             "--config", str(tmp_path / "c.json"),
+             "--out", str(tmp_path / "o.json")],
+            capture_output=True, text=True, cwd=ROOT)
+        assert r.returncode == 0, r.stderr[-300:]
+        assert "partial result" in r.stdout
+        assert (tmp_path / "o.json").exists()

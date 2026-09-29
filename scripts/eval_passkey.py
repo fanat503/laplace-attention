@@ -127,6 +127,9 @@ def main() -> None:
     args = ap.parse_args()
 
     cfg = json.load(open(args.config, encoding="utf-8"))["model"]
+        # FIX #32 (attack G1): analysis must be bit-exact and CPU-runnable;
+    # speed configs may declare sdpa_fold/pallas. Pin manual for analysis.
+    cfg = dict(cfg, attention_backend="manual")
     model = GPT(GPTConfig(**cfg)).eval()
     try:
         payload = torch.load(args.checkpoint, map_location="cpu",

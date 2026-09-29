@@ -1202,3 +1202,155 @@ class TestLogToolsCrashResumeContract:
         body = src[i:j]
         assert 'legend(loc="lower left")' in body, \
             "fig1 legend must be pinned (default lands under the inset)"
+
+
+class TestSpeedBackendConfigMatrix:
+    """#30/#30b config matrix: every speed config must load through GPTConfig,
+    declare exactly the intended backend, satisfy the fold-legality invariant
+    (|alpha*range| <= clip for each active folded bias), and GPU configs must
+    not request the TPU-only pallas backend."""
+
+    TPU = {
+        "kaggle_200m_base_speed_sdpa_s42": "sdpa",
+        "kaggle_200m_hla_speed_fold_s42": "sdpa_fold",
+        "kaggle_200m_hla_speed_pallas_s42": "pallas",
+        "700m_base_14b_sdpa_s42": "sdpa",
+        "700m_hla_14b_fold_s42": "sdpa_fold",
+        "700m_hla_14b_pallas_s42": "pallas",
+    }
+    GPU = {
+        "gpu_200m_base_flash_s42": "sdpa",
+        "gpu_200m_hla_flash_fold_s42": "sdpa_fold",
+        "gpu_700m_base_flash_s42": "sdpa",
+        "gpu_700m_hla_flash_fold_s42": "sdpa_fold",
+    }
+
+    def _check(self, name, backend):
+        import json, os
+        from src.model import GPTConfig
+        path = os.path.join(ROOT, "configs", name + ".json")
+        m = json.load(open(path))["model"]
+        cfg = GPTConfig(**m)
+        assert cfg.attention_backend == backend, name
+        if m.get("use_distance_laplace") and m.get("distance_laplace_alpha", 0):
+            assert abs(m["distance_laplace_alpha"] * m.get("distance_laplace_range", 1.0)) \
+                <= m.get("distance_laplace_clip", 1.0), name
+        if m.get("use_salience_bias") and m.get("salience_alpha", 0):
+            assert abs(m["salience_alpha"] * m.get("salience_range", 1.0)) \
+                <= m.get("salience_clip", 2.0), name
+
+    def test_tpu_matrix(self):
+        for name, backend in self.TPU.items():
+            self._check(name, backend)
+
+    def test_gpu_matrix_no_pallas(self):
+        for name, backend in self.GPU.items():
+            self._check(name, backend)
+            assert backend != "pallas"
+
+    def test_speed_docs_exist(self):
+        import os
+        assert os.path.exists(os.path.join(ROOT, "docs", "SPEED_BACKENDS.md"))
+
+
+class TestBenchSpeedProvenance:
+    """Attack round H (speed-claim methodology). #33: the bench JSON must
+    record WHICH backend was actually measured (plus shapes and torch
+    version) - without provenance a reviewer can dismiss the speed table.
+    H3a: self-vs-self ratio is the noise floor (sanity). H3b: pallas on a
+    CPU host fails loud in bench too - a silent manual fallback would fake
+    the speed table."""
+
+    def _cfg(self, tmp_path, name, **extra):
+        import json
+        kw = dict(block_size=128, vocab_size=256, padded_vocab_size=256,
+                  n_layer=1, n_head=2, n_embd=64,
+                  gradient_checkpointing=False, **extra)
+        p = tmp_path / f"{name}.json"
+        p.write_text(json.dumps({"model": kw}))
+        return str(p)
+
+    def test_bench_records_backend_provenance(self, tmp_path):
+        import json, subprocess, sys, os
+        m = self._cfg(tmp_path, "m", attention_backend="manual")
+        f = self._cfg(tmp_path, "f", phase_mult=0.15,
+                      use_distance_laplace=True, distance_laplace_alpha=0.5,
+                      attention_backend="sdpa_fold")
+        out = tmp_path / "b.json"
+        r = subprocess.run([sys.executable,
+                            os.path.join(ROOT, "scripts", "bench.py"),
+                            "--base", m, "--hla", f, "--steps", "2",
+                            "--batch", "1", "--seq-len", "64",
+                            "--out", str(out)],
+                           capture_output=True, text=True, cwd=ROOT)
+        assert r.returncode == 0, r.stderr[-300:]
+        b = json.loads(out.read_text())
+        assert b["base"]["attention_backend"] == "manual"
+        assert b["hla"]["attention_backend"] == "sdpa_fold"
+        assert "torch_version" in b["base"]
+
+    def test_bench_pallas_on_cpu_fails_loud(self, tmp_path):
+        import subprocess, sys, os
+        try:
+            import torch_xla  # noqa: F401
+            import pytest
+            pytest.skip("torch_xla present")
+        except ImportError:
+            pass
+        m = self._cfg(tmp_path, "m")
+        p = self._cfg(tmp_path, "p", phase_mult=0.15,
+                      use_distance_laplace=True, distance_laplace_alpha=0.5,
+                      attention_backend="pallas")
+        r = subprocess.run([sys.executable,
+                            os.path.join(ROOT, "scripts", "bench.py"),
+                            "--base", m, "--hla", p, "--steps", "1",
+                            "--batch", "1", "--seq-len", "64"],
+                           capture_output=True, text=True, cwd=ROOT)
+        assert r.returncode != 0
+        assert "torch_xla" in r.stderr
+
+
+class TestFigureCoverageGuard:
+    """Regression #34 (attack I2): with multi-session autoresume runs a
+    tail-only CSV (single resume-session log) passed against a full log
+    used to produce a silently-wrong figure (curves covering different
+    token ranges). fig1/fig2/fig5 must refuse loudly; the legit fix -
+    concatenated session CSVs (read_log keep-last seam handling, #14) -
+    must still draw."""
+
+    def _mk(self, tmp_path, name, lo, hi):
+        hdr = "step,tokens_seen,lr,train_loss,val_loss\n"
+        rows = [f"{s},{s*262144},0.0003,{4.0-s*1e-5:.6f},"
+                f"{(f'{5.0-s*1e-4:.6f}' if s % 500 == 0 else 'nan')}\n"
+                for s in range(lo, hi + 1, 50)]
+        p = tmp_path / f"{name}.csv"
+        p.write_text(hdr + "".join(rows))
+        return str(p)
+
+    def _mpf(self):
+        import importlib.util, os
+        pytest.importorskip("matplotlib")
+        spec = importlib.util.spec_from_file_location(
+            "mpf", os.path.join(ROOT, "scripts", "make_paper_figures.py"))
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        return m
+
+    def test_tail_only_log_refused_loud(self, tmp_path):
+        mpf = self._mpf()
+        full = self._mk(tmp_path, "full", 50, 15000)
+        tail = self._mk(tmp_path, "tail", 10550, 15000)
+        with pytest.raises(SystemExit, match="coverage mismatch"):
+            mpf.fig1_twin_divergence(full, tail, str(tmp_path / "f.png"))
+
+    def test_concatenated_sessions_accepted(self, tmp_path):
+        import os
+        mpf = self._mpf()
+        full = self._mk(tmp_path, "full2", 50, 15000)
+        s1 = open(self._mk(tmp_path, "s1", 50, 10700)).read()
+        s2 = open(self._mk(tmp_path, "s2", 10550, 15000)).read()
+        cat = tmp_path / "cat.csv"
+        cat.write_text(s1 + s2)  # includes mid-file header: read_log handles
+        out = tmp_path / "ok.png"
+        mpf.fig1_twin_divergence(full, str(cat), str(out))
+        assert os.path.exists(out)

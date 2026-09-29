@@ -46,17 +46,18 @@ with the components (all zero / identity at initialization):
 
 | Symbol | Definition | Mechanism | Init value |
 |---|---|---|---|
-| R(θ_i) | pairwise rotation by θ_i = π·ρ_h·λ_l·tanh(W_φq x_i) | phase (query side) | R(0) = **I** |
-| R(φ_j) | pairwise rotation by φ_j = π·ρ_h·λ_l·tanh(W_φk x_j) | phase (key side) | R(0) = **I** |
-| m_j | (1−β_k) + β_k·exp(clamp(α·tanh(W_gk x_j)·r_k, ±c_k)) | K-gate | **1** |
-| u_j | (1−β_v) + β_v·exp(clamp(α·tanh(W_gv x_j)·r_v, ±c_v)) | V-gate | **1** |
+| R(θ_i) | pairwise rotation by θ_i = π·μ_φ·ρ_h·λ_l·tanh(W_φq x_i) | phase (query side) | R(0) = **I** |
+| R(φ_j) | pairwise rotation by φ_j = π·μ_φ·ρ_h·λ_l·tanh(W_φk x_j) | phase (key side) | R(0) = **I** |
+| m_j | (1−β_k) + β_k·exp(clamp(α·tanh(W_gk x_j)·r_k·λ_l, ±c_k·λ_l)) | K-gate | **1** |
+| u_j | (1−β_v) + β_v·exp(clamp(α·tanh(W_gv x_j)·r_v·λ_l, ±c_v·λ_l)) | V-gate | **1** |
 | B_ij | b^sal_j + b^dist_ij + (S_i − S_j) | additive biases | **0** |
 | b^sal_j | clamp(α_s·r_s·tanh(W_s x_j), ±c_s) | salience | 0 |
 | b^dist_ij | clamp(α_d·r_d·λ_l·d(i,j)·tanh(W_gd x_j), ±c_d) — W_gd is distance's OWN gate (deconfounded from the K-gate); d(i,j) = (i−j)/(block_size−1) ∈ [0,1], normalized by the MODEL constant (not the batch length) so the bias for a fixed pair is independent of how much context is in the batch — prefix-stable, hence KV-cache-exact (tested) | distance | 0 |
 | τ_i | exp(clamp(α_q·r_q·tanh(W_qt x_i), ±c_q)) — per-query softmax temperature (SSA/SSMax family; the only non-no-op Q-side score form, since an additive per-query bias cancels in softmax) | Q-temp | **1** |
 | S_i − S_j | S_t = Σ_{τ≤t} α_f·r_f·tanh(W_f x_τ), clamped | forget (FoX-family) | 0 |
 | ρ_h | 1 + tanh(s_h) — per-head phase budget | head adaptivity | 1 |
-| λ_l | 1 + (l/L)·softplus(θ_l)/softplus(0) — depth profile | layer adaptivity | 1 + l/L (static) |
+| μ_φ | `phase_mult` config constant (0.15 in all runs) — global phase budget; max attainable angle = π·μ_φ·2·2 = 0.6π with head+layer budgets maxed | phase scale | 0.15 (fixed) |
+| λ_l | 1 + (l/L)·softplus(θ_l)/softplus(0) — depth profile; applies to phase, K/V-gates (range AND clamp) and distance; NOT to salience/q-temp/forget (code-verified r85) | layer adaptivity | 1 + l/L (static) |
 
 Where the base model is recovered by ρ, λ multipliers irrelevant because every
 learned input to them is zero. **Reading the formula**: R controls *where
@@ -239,7 +240,12 @@ rule, in a fixed order:
 - ∂L/∂r_k = ∂L/∂r_v = 0 (each enters as exp(α·r·tanh(Wx)) with tanh(0)=0:
   the derivative carries a tanh(Wx) factor that is identically zero at Θ₀);
 - ∂L/∂s_h = 0 (phase budget multiplies angles that are zero);
-- ∂L/∂W_f = 0 while r_f = 0 (the whole forget branch is scaled by r_f);
+- ∂L/∂r_f = 0 while the forget GATE is closed (the derivative carries a
+  tanh(W_f x) factor, identically zero at Θ₀). NOTE the converse of the
+  naive reading: r_f = forget_range·(1+flex·tanh(W_range_f)) equals 0.1,
+  NOT 0, at Θ₀ — identity-at-init is carried by the gate, so ∂L/∂W_f is
+  a small NONZERO PRIMARY gradient (measured 9.1e-4 at tiny-Θ₀): W_f
+  wakes FIRST, r_f wakes only after the gate opens (code-verified r86);
 - ∂L/∂θ_l = 0 (depth profile multiplies zero-valued mechanism outputs).
 Measured at Θ₀: primary gradients 1e-5–3e-3; ALL secondary gradients 0.0
 exactly (bit-zero, not small). Consequence - a falsifiable training-dynamics
