@@ -57,7 +57,15 @@ def bench_config(path: str, *, steps: int, batch: int, seq_len: int,
             times.append(time.perf_counter() - t0)
     med = statistics.median(times)
     return {"median_step_sec": med, "tokens_per_sec": batch * T / med,
-            "params": model.parameter_count()}
+            "params": model.parameter_count(),
+            # FIX #33 (attack H2): the speed table must carry its own
+            # provenance. Without recording WHICH backend was actually
+            # benchmarked, a reviewer can claim the numbers came from the
+            # wrong path. Also record steps/batch/seq for reproducibility.
+            "attention_backend": cfg.get("attention_backend", "manual"),
+            "config_path": os.path.abspath(path),
+            "steps": steps, "batch": batch, "seq_len": T,
+            "torch_version": torch.__version__}
 
 
 def main() -> None:

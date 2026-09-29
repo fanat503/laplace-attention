@@ -555,6 +555,78 @@ class CausalSelfAttention(nn.Module):
             y = y.transpose(1, 2).contiguous().view(B, T, C)
             return self.c_proj(y)
 
+        # SPEED #30 (sdpa_fold): V8 measured the exact manual path at ~94k tok/s
+        # vs 152k for base-on-SDPA - the dominant cost is materializing att
+        # itself, not side buffers (#28 removed those; +5% only). Fix: every
+        # ACTIVE additive bias of ours is per-key or rank-1, so it can ride
+        # INSIDE the qk dot product via augmented head dims:
+        #   distance: bias_ij = p_i*c_j - p_j*c_j  ->  q+=[sd*p_i, sd*1],
+        #             k+=[c_j, -p_j*c_j]           (exact iff clamp inactive:
+        #             |alpha*range| <= clip, the #29 guard)
+        #   salience: bias_ij = s_j               ->  q+=[sd*1], k+=[s_j]
+        #             (exact iff |alpha*range| <= clip)
+        # Then softmax((q' k'^T)/sd) == softmax(qk/sd + bias) EXACTLY in real
+        # arithmetic; float diff is reduction-order only (~1e-6). This makes
+        # the flash/SDPA kernel legal for HLA: zero (B,H,T,T) materialization.
+        # NOT used for the frozen science pair (bit-exact manual path there);
+        # it is the production/speed backend, verified vs manual in tests.
+        fold_ok = (
+            self.attention_backend in ("sdpa_fold", "pallas")
+            and not self.capture_diagnostics
+            and not self.capture_attention
+            and not (self.use_forget_gate and self.forget_alpha != 0.0)
+            and (not (self.use_distance_laplace and self.distance_laplace_alpha != 0.0)
+                 or abs(float(self.distance_laplace_alpha) * float(self.distance_laplace_range))
+                 <= float(self.distance_laplace_clip))
+            and (not (self.use_salience_bias and self.salience_alpha != 0.0)
+                 or abs(float(self.salience_alpha) * float(self.salience_range))
+                 <= float(self.salience_clip))
+        )
+        if fold_ok:
+            scale = 1.0 / math.sqrt(hs)
+            sd = math.sqrt(hs)
+            extras_q, extras_k = [], []
+            if self.use_distance_laplace and self.distance_laplace_alpha != 0.0:
+                gate_d = torch.tanh(self.W_gate_d(x)).float()  # (B, T, H)
+                pos_n = (torch.arange(T, device=x.device).float()
+                         / float(max(1, self.block_size - 1)))
+                coef = (self.distance_laplace_alpha
+                        * self.distance_laplace_range * layer_mult)
+                cg = (coef * gate_d).transpose(1, 2)  # (B, H, T)
+                extras_q.append((sd * pos_n).view(1, 1, T, 1)
+                                .expand(B, self.n_head, T, 1))
+                extras_q.append(q.new_full((B, self.n_head, T, 1), sd,
+                                           dtype=torch.float32))
+                extras_k.append(cg.unsqueeze(-1))
+                extras_k.append((-pos_n.view(1, 1, T) * cg).unsqueeze(-1))
+            if self.use_salience_bias and self.salience_alpha != 0.0:
+                gate_sal = torch.tanh(self.W_gate_sal(x)).float()  # (B, T, H)
+                sal = (self.salience_alpha * self.salience_range
+                       * gate_sal).transpose(1, 2)  # (B, H, T)
+                extras_q.append(q.new_full((B, self.n_head, T, 1), sd,
+                                           dtype=torch.float32))
+                extras_k.append(sal.unsqueeze(-1))
+            if extras_q:
+                qf = torch.cat([q] + [e.to(q.dtype) for e in extras_q], dim=-1)
+                kf = torch.cat([k] + [e.to(k.dtype) for e in extras_k], dim=-1)
+            else:
+                qf, kf = q, k
+            if self.attention_backend == "pallas":
+                # TPU path: torch_xla Pallas flash-attention kernel. The fold
+                # makes it legal: biases live INSIDE q'/k', the kernel only
+                # needs plain causal softmax(q'k'^T*scale)@v. Top-lab port
+                # recipe: augment q/k exactly like above, then call ANY flash
+                # kernel (FlashAttention-2 on CUDA, Pallas on TPU) with an
+                # explicit scale=1/sqrt(hs) (NOT 1/sqrt(hs+extra)).
+                from torch_xla.experimental.custom_kernel import flash_attention
+                y = flash_attention(qf, kf, v, causal=True, sm_scale=scale)
+            else:
+                y = F.scaled_dot_product_attention(
+                    qf, kf, v, attn_mask=None, dropout_p=0.0,
+                    is_causal=True, scale=scale)
+            y = y.transpose(1, 2).contiguous().view(B, T, C)
+            return self.c_proj(y)
+
         att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(hs))
 
 
@@ -823,7 +895,7 @@ class GPTConfig:
     gradient_checkpointing: bool = True
     fused_swiglu: bool = True
     ffn_hidden_multiple_of: int = 64
-    attention_backend: str = "manual"  # "manual" or optional "sdpa" speed-probe backend
+    attention_backend: str = "manual"  # "manual" | "sdpa" | "sdpa_fold" | "pallas" (#30: rank-1 biases fold into qk; pallas = same fold through torch_xla Pallas flash kernel on TPU)
 
     baseline_type: str = "parameter_matched_ablated"
 
@@ -888,8 +960,9 @@ class GPTConfig:
             raise ValueError("layer_dependent_phase requires layer_dependent_gate=true (shared depth profile)")
         if self.ffn_hidden_multiple_of <= 0:
             raise ValueError("ffn_hidden_multiple_of must be positive")
-        if self.attention_backend not in {"manual", "sdpa"}:
-            raise ValueError("attention_backend must be 'manual' or 'sdpa'")
+        if self.attention_backend not in {"manual", "sdpa", "sdpa_fold", "pallas"}:
+            raise ValueError(
+                "attention_backend must be 'manual', 'sdpa', 'sdpa_fold' or 'pallas'")
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)

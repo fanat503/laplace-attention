@@ -118,6 +118,13 @@ def build_franken(base_state: Dict[str, torch.Tensor],
         body, graft = hla_state, base_state
     else:
         raise ValueError(f"unknown donor: {donor}")
+    # FIX #41 (attack P5): an unknown transplant name silently degraded to
+    # qk-only splicing (the elif chain matched nothing beyond c_attn rows) -
+    # an H5 caller passing a typo would get a VALID-LOOKING but wrong-arm
+    # closure. The CLI is argparse-guarded; the function must be too.
+    if transplant not in ("qk", "phase", "retrieval", "full"):
+        raise ValueError(f"unknown transplant set: {transplant!r} "
+                         f"(want qk|phase|retrieval|full)")
     if transplant == "full":
         return dict(graft)
 
@@ -215,7 +222,7 @@ def gap_closure(base: Dict[str, float], hla: Dict[str, float],
                "gap": gap}
         if not (gap == gap) or abs(gap) < MIN_MEANINGFUL_GAP:
             rec["closure"] = float("nan")
-            rec["closure_note"] = 1.0  # gap too small to attribute
+            rec["gap_too_small"] = 1.0  # #39: self-documenting numeric flag
         else:
             rec["closure"] = (franken[m] - base[m]) / gap
             noise = max(base.get(f"{m}_std", 0.0), hla.get(f"{m}_std", 0.0),
@@ -226,7 +233,16 @@ def gap_closure(base: Dict[str, float], hla: Dict[str, float],
             # probe noise - the JSON says so explicitly instead of letting a
             # reader over-trust a percentage.
             rec["min_detectable_gap_z3"] = 3.0 * noise
-            rec["gap_over_noise_z"] = abs(gap) / noise if noise > 0 else float("inf")
+            # FIX #40 (attack N): float("inf")/NaN serialize as Infinity/NaN
+            # literals - the H5 artifact (a published paper artifact!) becomes
+            # INVALID JSON per RFC 8259 (jq/browsers/strict parsers reject).
+            # noise==0 means "measured exactly across seeds": encode as a
+            # large finite sentinel + explicit flag instead of Infinity.
+            if noise > 0:
+                rec["gap_over_noise_z"] = abs(gap) / noise
+            else:
+                rec["gap_over_noise_z"] = 1e9
+                rec["noise_exact_zero"] = 1.0
             rec["powered"] = 1.0 if (noise == 0.0 or abs(gap) >= 3.0 * noise) else 0.0
         out[m] = rec
     return out
@@ -263,6 +279,15 @@ def main() -> None:
             f"got {args.probe_seeds!r}") from None
 
     cfg = json.load(open(args.hla_config, encoding="utf-8"))["model"]
+    # FIX #32 (attack G1): H5 analysis must be bit-exact and CPU-runnable.
+    # Speed configs may declare attention_backend="sdpa_fold" (different
+    # reduction order, ~1e-7 drift in probe stats) or "pallas" (crashes
+    # without torch_xla). Analysis semantics are backend-independent, so we
+    # pin the exact manual path regardless of what the training config used.
+    if cfg.get("attention_backend", "manual") != "manual":
+        print(f"[causal_patch] overriding attention_backend="
+              f"{cfg['attention_backend']!r} -> 'manual' (bit-exact analysis)")
+        cfg["attention_backend"] = "manual"
     base_state = load_state(args.base_checkpoint)
     hla_state = load_state(args.hla_checkpoint)
     results: Dict[str, Dict[str, float]] = {}
@@ -289,7 +314,7 @@ def main() -> None:
         results["gap_closure"] = closure  # type: ignore[assignment]
         print("\n=== H5 FORWARD closure (sufficiency; pre-reg: >0.50 causal, <0.20 not) ===")
         for m, rec in closure.items():
-            if rec.get("closure_note"):
+            if rec.get("gap_too_small"):
                 print(f"  {m:24s}: gap={rec['gap']:+.6f} TOO SMALL to attribute (no claim)")
             else:
                 print(f"  {m:24s}: closure={rec['closure']:+.3f} "
@@ -300,7 +325,7 @@ def main() -> None:
         results["gap_closure_reverse"] = closure_r  # type: ignore[assignment]
         print("\n=== H5 REVERSE closure (necessity; pre-reg: <0.50 = gain collapses) ===")
         for m, rec in closure_r.items():
-            if rec.get("closure_note"):
+            if rec.get("gap_too_small"):
                 print(f"  {m:24s}: gap={rec['gap']:+.6f} TOO SMALL to attribute (no claim)")
             else:
                 print(f"  {m:24s}: closure={rec['closure']:+.3f} "
@@ -315,7 +340,17 @@ def main() -> None:
                        "probe_batch": args.probe_batch}
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     with open(args.out, "w", encoding="utf-8") as f:
-        json.dump(results, f, indent=2)
+        # FIX #40: allow_nan=False would crash on legit NaN probe values;
+        # sanitize instead: NaN -> null (valid JSON, honest "no value").
+        def _clean(o):
+            if isinstance(o, dict):
+                return {k: _clean(v) for k, v in o.items()}
+            if isinstance(o, list):
+                return [_clean(v) for v in o]
+            if isinstance(o, float) and (o != o or o in (float("inf"), float("-inf"))):
+                return None
+            return o
+        json.dump(_clean(results), f, indent=2)
     print(f"wrote {args.out}")
 
 

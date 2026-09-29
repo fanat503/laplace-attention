@@ -1448,3 +1448,322 @@ class TestDistanceRank1FastPath:
         ref = dist[None, None] * cg.unsqueeze(2)
         causal = torch.tril(torch.ones(T, T, dtype=torch.bool))
         assert ((fast - ref).abs() * causal).max().item() < 1e-6
+
+
+class TestSdpaFoldBackend:
+    """Finding #30: rank-1/per-key additive biases fold INTO the qk dot
+    product via augmented head dims, making the SDPA/flash kernel legal for
+    HLA. V8 measured the exact manual path at ~94k tok/s vs 152k base: the
+    dominant cost is materializing att itself. The fold backend removes every
+    (B,H,T,T) materialization. Float diff vs manual is reduction-order only.
+    NOT the science-pair backend (that stays manual & bit-exact)."""
+
+    HLA = dict(block_size=64, vocab_size=256, n_layer=2, n_head=2, n_embd=32,
+               gradient_checkpointing=False, phase_mult=0.15, use_laplace=True,
+               laplace_alpha=1.0, use_distance_laplace=True,
+               distance_laplace_alpha=0.5, distance_laplace_range=1.0,
+               distance_laplace_clip=1.0, use_salience_bias=True,
+               salience_alpha=1.0, salience_range=1.0, salience_clip=2.0)
+
+    def _pair(self):
+        torch.manual_seed(7)
+        man = GPT(small_cfg(**self.HLA, attention_backend="manual"))
+        with torch.no_grad():
+            for b in man.transformer.h:
+                b.attn.W_gate_d.weight.normal_(0, 0.6)
+                b.attn.W_gate_sal.weight.normal_(0, 0.6)
+        fold = GPT(small_cfg(**self.HLA, attention_backend="sdpa_fold"))
+        fold.load_state_dict(man.state_dict())
+        g = torch.Generator(); g.manual_seed(3)
+        x = torch.randint(0, 256, (2, 64), generator=g)
+        return man, fold, x
+
+    def test_logits_match_manual_with_live_gates(self):
+        man, fold, x = self._pair()
+        man.eval(); fold.eval()
+        with torch.no_grad():
+            lm, _ = man(x); lf, _ = fold(x)
+        assert (lm - lf).abs().max().item() < 5e-5
+
+    def test_grads_match_manual(self):
+        man, fold, x = self._pair()
+        _, l1 = man(x, x); l1.backward()
+        _, l2 = fold(x, x); l2.backward()
+        assert abs(l1.item() - l2.item()) < 5e-6
+        gm = {n: p.grad for n, p in man.named_parameters() if p.grad is not None}
+        mx = max((p.grad - gm[n]).abs().max().item()
+                 for n, p in fold.named_parameters()
+                 if p.grad is not None and n in gm)
+        assert mx < 5e-5
+
+    def test_binding_clip_refuses_fold(self):
+        """|alpha*range| > clip => clamp can be active => fold is NOT exact
+        => must fall back to the exact manual path (same #29 guard logic)."""
+        kw = dict(self.HLA, distance_laplace_alpha=2.0)
+        torch.manual_seed(0)
+        m = GPT(small_cfg(**kw, attention_backend="sdpa_fold")).eval()
+        with torch.no_grad():
+            for b in m.transformer.h:
+                b.attn.W_gate_d.weight.fill_(100.0)
+        m2 = GPT(small_cfg(**kw, attention_backend="manual")).eval()
+        m2.load_state_dict(m.state_dict())
+        g = torch.Generator(); g.manual_seed(3)
+        x = torch.randint(0, 256, (1, 64), generator=g)
+        with torch.no_grad():
+            lf, _ = m(x); lm, _ = m2(x)
+        # fold_ok is False -> both take the manual clamped path -> identical
+        assert torch.equal(lf, lm)
+
+    def test_diagnostics_force_manual_path(self):
+        man, fold, x = self._pair()
+        fold.set_diagnostics(enabled=True)
+        man.set_diagnostics(enabled=True)
+        fold.eval(); man.eval()
+        with torch.no_grad():
+            lf, _ = fold(x); lm, _ = man(x)
+        assert torch.equal(lf, lm)  # both manual now: bit-exact
+        blk = fold.transformer.h[0].attn
+        assert blk.last_distance_bias_abs_mean is not None
+
+
+class TestPallasBackend:
+    """#30b: the "pallas" backend feeds the SAME folded q'/k' into the
+    torch_xla Pallas flash-attention kernel. On CPU (no torch_xla) it must
+    fail LOUD, never silently fall back - silent fallback would fake speed
+    numbers. Math is shared with sdpa_fold (tested above), so CPU tests here
+    pin config plumbing + loud failure only; the kernel itself is TPU-smoke."""
+
+    HLA = dict(block_size=64, vocab_size=256, n_layer=1, n_head=2, n_embd=32,
+               gradient_checkpointing=False, phase_mult=0.15, use_laplace=True,
+               laplace_alpha=1.0, use_distance_laplace=True,
+               distance_laplace_alpha=0.5, use_salience_bias=True,
+               salience_alpha=1.0)
+
+    def test_config_accepts_pallas(self):
+        cfg = small_cfg(**self.HLA, attention_backend="pallas")
+        assert cfg.attention_backend == "pallas"
+
+    def test_bad_backend_still_rejected(self):
+        with pytest.raises(ValueError):
+            small_cfg(**self.HLA, attention_backend="triton")
+
+    def test_pallas_without_torch_xla_fails_loud(self):
+        pytest.importorskip is not None
+        try:
+            import torch_xla  # noqa: F401
+            pytest.skip("torch_xla present; kernel path exercised on TPU")
+        except ImportError:
+            pass
+        torch.manual_seed(0)
+        m = GPT(small_cfg(**self.HLA, attention_backend="pallas"))
+        with torch.no_grad():
+            for b in m.transformer.h:
+                b.attn.W_gate_d.weight.normal_(0, 0.5)
+        x = torch.randint(0, 256, (1, 64))
+        with pytest.raises(ImportError):
+            m(x)
+
+    def test_pallas_with_diagnostics_uses_manual_bit_exact(self):
+        torch.manual_seed(0)
+        m = GPT(small_cfg(**self.HLA, attention_backend="pallas"))
+        with torch.no_grad():
+            for b in m.transformer.h:
+                b.attn.W_gate_d.weight.normal_(0, 0.5)
+        m2 = GPT(small_cfg(**self.HLA, attention_backend="manual"))
+        m2.load_state_dict(m.state_dict())
+        m.set_diagnostics(enabled=True); m2.set_diagnostics(enabled=True)
+        m.eval(); m2.eval()
+        x = torch.randint(0, 256, (1, 64))
+        with torch.no_grad():
+            l1, _ = m(x); l2, _ = m2(x)
+        assert torch.equal(l1, l2)
+
+
+class TestSpeedBackendPanelRegressions:
+    """Adversarial panel round on #30/#30b, executed attacks locked as tests:
+    bf16 numerics, T < block_size prefix stability, ALL mechanisms live
+    together, empty-extras degenerate path."""
+
+    HLA = dict(block_size=64, vocab_size=256, n_layer=1, n_head=2, n_embd=64,
+               gradient_checkpointing=False, phase_mult=0.15, use_laplace=True,
+               laplace_alpha=1.0, use_distance_laplace=True,
+               distance_laplace_alpha=0.5, use_salience_bias=True,
+               salience_alpha=1.0)
+
+    def _pair(self, **extra):
+        torch.manual_seed(0)
+        man = GPT(small_cfg(**dict(self.HLA, **extra), attention_backend="manual"))
+        with torch.no_grad():
+            for b in man.transformer.h:
+                b.attn.W_gate_d.weight.normal_(0, 0.6)
+                b.attn.W_gate_sal.weight.normal_(0, 0.6)
+        fold = GPT(small_cfg(**dict(self.HLA, **extra), attention_backend="sdpa_fold"))
+        fold.load_state_dict(man.state_dict())
+        return man.eval(), fold.eval()
+
+    def test_bf16_matches_at_bf16_noise_scale(self):
+        man, fold = self._pair()
+        x = torch.randint(0, 256, (1, 64))
+        with torch.no_grad():
+            lm, _ = man.to(torch.bfloat16)(x)
+            lf, _ = fold.to(torch.bfloat16)(x)
+        assert (lm.float() - lf.float()).abs().max().item() < 0.15
+
+    def test_short_sequence_prefix_stable(self):
+        man, fold = self._pair()
+        x = torch.randint(0, 256, (1, 17))
+        with torch.no_grad():
+            lm, _ = man(x); lf, _ = fold(x)
+        assert (lm - lf).abs().max().item() < 5e-5
+
+    def test_all_mechanisms_live_together(self):
+        man, fold = self._pair(use_qtemp=True, qtemp_alpha=0.5, n_layer=2)
+        x = torch.randint(0, 256, (2, 64))
+        with torch.no_grad():
+            lm, _ = man(x); lf, _ = fold(x)
+        assert (lm - lf).abs().max().item() < 5e-5
+
+    def test_empty_extras_equals_plain_sdpa_bitexact(self):
+        kw = dict(block_size=64, vocab_size=256, n_layer=1, n_head=2,
+                  n_embd=64, gradient_checkpointing=False)
+        torch.manual_seed(2)
+        f = GPT(small_cfg(**kw, attention_backend="sdpa_fold")).eval()
+        s = GPT(small_cfg(**kw, attention_backend="sdpa")).eval()
+        s.load_state_dict(f.state_dict())
+        x = torch.randint(0, 256, (1, 64))
+        with torch.no_grad():
+            l1, _ = f(x); l2, _ = s(x)
+        assert torch.equal(l1, l2)
+
+
+class TestSpeedBackendAdvancedInteractions:
+    """Attack round F (advanced-feature interactions with the fold backend),
+    all executed before locking: learnable layer temperature flowing into the
+    fold coefficient, gradient checkpointing recompute path, fp64 casts,
+    and state_dict round-trip between backends."""
+
+    BASE = dict(block_size=64, vocab_size=256, n_layer=2, n_head=2, n_embd=64,
+                gradient_checkpointing=False, phase_mult=0.15, use_laplace=True,
+                laplace_alpha=1.0, use_distance_laplace=True,
+                distance_laplace_alpha=0.5, use_salience_bias=True,
+                salience_alpha=1.0)
+
+    def _pair(self, **extra):
+        torch.manual_seed(3)
+        man = GPT(small_cfg(**dict(self.BASE, **extra),
+                            attention_backend="manual"))
+        with torch.no_grad():
+            for b in man.transformer.h:
+                b.attn.W_gate_d.weight.normal_(0, 0.6)
+                b.attn.W_gate_sal.weight.normal_(0, 0.6)
+                if extra.get("learnable_layer_temp"):
+                    b.attn.W_layer_temp.fill_(0.37)
+        fold = GPT(small_cfg(**dict(self.BASE, **extra),
+                             attention_backend="sdpa_fold"))
+        fold.load_state_dict(man.state_dict())
+        x = torch.randint(0, 256, (2, 64))
+        return man, fold, x
+
+    def test_learnable_layer_temp_flows_into_fold_coef(self):
+        man, fold, x = self._pair(layer_dependent_gate=True,
+                                  learnable_layer_temp=True)
+        man.eval(); fold.eval()
+        with torch.no_grad():
+            lm, _ = man(x); lf, _ = fold(x)
+        assert (lm - lf).abs().max().item() < 5e-5
+
+    def test_gradient_checkpointing_recompute_matches(self):
+        man, fold, x = self._pair(gradient_checkpointing=True)
+        _, l1 = man(x, x); l1.backward()
+        _, l2 = fold(x, x); l2.backward()
+        assert abs(l1.item() - l2.item()) < 5e-6
+        gm = {n: p.grad for n, p in man.named_parameters()
+              if p.grad is not None}
+        mx = max((p.grad - gm[n]).abs().max().item()
+                 for n, p in fold.named_parameters()
+                 if p.grad is not None and n in gm)
+        assert mx < 5e-5
+
+    def test_fp64_consistency(self):
+        man, fold, x = self._pair()
+        m64 = man.double().eval(); f64 = fold.double().eval()
+        with torch.no_grad():
+            lm, _ = m64(x); lf, _ = f64(x)
+        assert (lm - lf).abs().max().item() < 1e-6
+
+    def test_state_dict_round_trip_bit_exact(self):
+        man, fold, x = self._pair()
+        man2 = GPT(small_cfg(**self.BASE, attention_backend="manual"))
+        man2.load_state_dict(fold.state_dict())
+        man.eval(); man2.eval()
+        with torch.no_grad():
+            a, _ = man(x); b, _ = man2(x)
+        assert torch.equal(a, b)
+
+
+class TestPortRecipeLiteral:
+    """Attack round J (adopter copy-paste): the docs/SPEED_BACKENDS.md fold
+    recipe, implemented LITERALLY from the doc text, must reproduce the
+    implementation's augmented q'/k' bit-exactly and the end-to-end logits
+    to float tolerance. #35: layer_mult was used in the recipe but never
+    defined - fixed in the doc; this test pins the recipe/implementation
+    contract so doc drift fails CI."""
+
+    def test_doc_recipe_matches_implementation(self):
+        import math
+        import torch.nn.functional as F
+        cfg = small_cfg(block_size=64, vocab_size=256, n_layer=1, n_head=2,
+                        n_embd=64, gradient_checkpointing=False,
+                        phase_mult=0.15, use_laplace=True, laplace_alpha=1.0,
+                        use_distance_laplace=True, distance_laplace_alpha=0.5,
+                        use_salience_bias=True, salience_alpha=1.0,
+                        attention_backend="sdpa_fold")
+        torch.manual_seed(0)
+        m = GPT(cfg).eval()
+        with torch.no_grad():
+            for b in m.transformer.h:
+                b.attn.W_gate_d.weight.normal_(0, 0.6)
+                b.attn.W_gate_sal.weight.normal_(0, 0.6)
+        attn = m.transformer.h[0].attn
+        acts, qkv = {}, {}
+        hh = attn.register_forward_pre_hook(
+            lambda mod, args: acts.__setitem__("x", args[0].detach()))
+        orig = F.scaled_dot_product_attention
+
+        def spy(q, k, v, **kw):
+            qkv.setdefault("q", q.detach()); qkv.setdefault("k", k.detach())
+            qkv.setdefault("scale", kw.get("scale"))
+            return orig(q, k, v, **kw)
+
+        F.scaled_dot_product_attention = spy
+        try:
+            with torch.no_grad():
+                m(torch.randint(0, 256, (1, 64)))
+        finally:
+            F.scaled_dot_product_attention = orig
+            hh.remove()
+        x = acts["x"]; B, T, C = x.shape
+        H, d = attn.n_head, C // attn.n_head
+        sd = math.sqrt(d)
+        assert abs(qkv["scale"] - 1.0 / sd) < 1e-12  # explicit 1/sqrt(d)
+        p = torch.arange(T).float() / (cfg.block_size - 1)
+        lm = attn.layer_gate_multiplier
+        c = (0.5 * 1.0 * lm) * torch.tanh(attn.W_gate_d(x)).float()
+        s = torch.tanh(attn.W_gate_sal(x)).float()
+        cg, sal = c.transpose(1, 2), s.transpose(1, 2)
+        qf, kf = qkv["q"], qkv["k"]
+        q_doc = torch.cat([qf[..., :d],
+                           (sd * p).view(1, 1, T, 1).expand(B, H, T, 1),
+                           torch.full((B, H, T, 1), sd),
+                           torch.full((B, H, T, 1), sd)], dim=-1)
+        k_doc = torch.cat([kf[..., :d], cg.unsqueeze(-1),
+                           (-p.view(1, 1, T) * cg).unsqueeze(-1),
+                           sal.unsqueeze(-1)], dim=-1)
+        assert torch.equal(q_doc, qf)
+        assert torch.equal(k_doc, kf)
+
+    def test_doc_defines_layer_mult(self):
+        import os
+        doc = open(os.path.join(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__))), "docs", "SPEED_BACKENDS.md")).read()
+        assert "layer_mult = 1.0" in doc  # #35: recipe must define it

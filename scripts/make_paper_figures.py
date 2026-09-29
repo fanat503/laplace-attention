@@ -88,7 +88,33 @@ def read_log(path: str) -> Dict[str, List[float]]:
     return out
 
 
+def _check_coverage(base_log, hla_log, fig_name: str) -> None:
+    """FIX #34 (attack I2): with multi-session runs (autoresume) a user can
+    accidentally pass a tail-only CSV (e.g. only session-2, steps 10550+)
+    against a full-coverage twin. The old code silently drew a figure whose
+    two curves cover DIFFERENT token ranges - a silently-wrong paper figure.
+    Require comparable coverage; fail loud with the fix (concatenate the
+    session CSVs; read_log resolves resume seams with keep-last)."""
+    b = read_log(base_log) if isinstance(base_log, str) else base_log
+    h = read_log(hla_log) if isinstance(hla_log, str) else hla_log
+    bs = [t for t in b.get("tokens_seen", []) if t == t]
+    hs = [t for t in h.get("tokens_seen", []) if t == t]
+    if not bs or not hs:
+        raise SystemExit(f"{fig_name}: empty tokens_seen in one of the logs")
+    # Trigger only on a REAL tail-only log: the two starts differ by more
+    # than 25% of the full token range. Small grid shifts from asymmetric
+    # resumes (#16) are legitimate and handled downstream.
+    if abs(bs[0] - hs[0]) > 0.25 * max(bs[-1], hs[-1]):
+        raise SystemExit(
+            f"{fig_name}: coverage mismatch - base starts at {bs[0]:,.0f} "
+            f"tokens but HLA at {hs[0]:,.0f}. One log looks tail-only "
+            f"(a single resume-session CSV?). Concatenate ALL session CSVs "
+            f"for that run first (read_log resolves duplicate steps "
+            f"keep-last); refusing to draw a silently-wrong figure.")
+
+
 def fig1_twin_divergence(base_log, hla_log, out, seed_std: float = 0.0):
+    _check_coverage(base_log, hla_log, "fig1")
     plt = require_matplotlib()
     b, h = read_log(base_log), read_log(hla_log)
     fig, ax = plt.subplots(figsize=(4.2, 3.0))
@@ -128,6 +154,7 @@ def fig1_twin_divergence(base_log, hla_log, out, seed_std: float = 0.0):
 
 
 def fig2_litm_curves(base_log, hla_log, out, n_checkpoints: int = 3):
+    _check_coverage(base_log, hla_log, "fig2")
     plt = require_matplotlib()
     cols = ["pos_10", "pos_30", "pos_50", "pos_70", "pos_90"]
     depths = [10, 30, 50, 70, 90]
@@ -165,7 +192,7 @@ def fig3_gap_closure(causal_json, out):
     if not gc:
         raise SystemExit("causal JSON has no gap_closure block (rerun causal_patch.py)")
     gcr = res.get("gap_closure_reverse") or {}
-    metrics = [m for m, r in gc.items() if not r.get("closure_note")]
+    metrics = [m for m, r in gc.items() if not r.get("gap_too_small")]
     if not metrics:
         raise SystemExit("all gaps flagged too-small - nothing to plot honestly")
     fig, axes = plt.subplots(1, len(metrics), figsize=(3.1 * len(metrics), 3.2),
@@ -181,7 +208,7 @@ def fig3_gap_closure(causal_json, out):
         title = f"{m}\nfwd={r['closure']:.2f}"
         if "closure_std_bound" in r:
             title += f"±{r['closure_std_bound']:.2f}"
-        if rr and not rr.get("closure_note"):
+        if rr and not rr.get("gap_too_small"):
             names.insert(2, "anti-frk")
             vals.insert(2, rr["franken"])
             colors.insert(2, "#8FB03E")
@@ -229,6 +256,7 @@ def fig4_knockout_context(analysis_json, out):
 
 
 def fig5_mechanism_trajectories(base_log, hla_log, out):
+    _check_coverage(base_log, hla_log, "fig5")
     """Internal dynamics over training (GDN/Diff reviewer lesson: show WHEN
     mechanisms wake up, not just that they exist): gate/salience activity,
     saturation, and retrieval probes on one page, base vs HLA."""

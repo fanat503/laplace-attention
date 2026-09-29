@@ -8,6 +8,17 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from src.model import GPT, GPTConfig
 
 
+def _clean_json40(o):
+    """FIX #40: NaN/Infinity are invalid JSON (RFC 8259); emit null."""
+    if isinstance(o, dict):
+        return {k: _clean_json40(v) for k, v in o.items()}
+    if isinstance(o, list):
+        return [_clean_json40(v) for v in o]
+    if isinstance(o, float) and (o != o or o in (float("inf"), float("-inf"))):
+        return None
+    return o
+
+
 def count_forward_flops(model: GPT, batch_size: int = 1, seq_len: int = 2048) -> int:
     """Count forward FLOPs per call (excluding backward).
 
@@ -187,7 +198,7 @@ def main():
         "matched_hla_max_steps": matched_hla_steps,
     }
     with open(args.out, "w") as f:
-        json.dump(results, f, indent=2)
+        json.dump(_clean_json40(results), f, indent=2)
     print(f"\nSaved: {args.out}")
 
 

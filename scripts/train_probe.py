@@ -222,6 +222,9 @@ def main() -> None:
     args = ap.parse_args()
 
     cfg = json.load(open(args.config, encoding="utf-8"))["model"]
+        # FIX #32 (attack G1): analysis must be bit-exact and CPU-runnable;
+    # speed configs may declare sdpa_fold/pallas. Pin manual for analysis.
+    cfg = dict(cfg, attention_backend="manual")
     model = GPT(GPTConfig(**cfg)).eval()
     try:
         payload = torch.load(args.checkpoint, map_location="cpu", weights_only=True)
@@ -244,10 +247,20 @@ def main() -> None:
     res["meta"] = {"checkpoint": args.checkpoint, "config": args.config}
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     json.dump(res, open(args.out, "w", encoding="utf-8"), indent=2)
-    print(f"probe_acc middle={res.get('probe_acc_middle'):.3f} "
-          f"edge={res.get('probe_acc_edge'):.3f} "
-          f"litm_gap={res.get('probe_litm_gap'):+.3f} "
-          f"(chance={res.get('chance'):.3f})")
+    # FIX #42 (attack R2): run_probe's early-return path (e.g. the
+    # "vocab/block too small" guard) yields a partial dict; formatting None
+    # with :.3f crashed main AFTER the JSON was written -> rc=1 with a
+    # valid artifact on disk, which an orchestration script would read as
+    # total failure. Print defensively; the JSON remains the ground truth.
+    def _f(x, spec="{:.3f}"):
+        return spec.format(x) if isinstance(x, (int, float)) and x == x else "n/a"
+    if res.get("note"):
+        print(f"probe: partial result ({res['note']}) - see JSON")
+    else:
+        print(f"probe_acc middle={_f(res.get('probe_acc_middle'))} "
+              f"edge={_f(res.get('probe_acc_edge'))} "
+              f"litm_gap={_f(res.get('probe_litm_gap'), '{:+.3f}')} "
+              f"(chance={_f(res.get('chance'))})")
     sel = res.get("probe_selectivity") or {}
     if sel:
         worst = min(sel.values())
