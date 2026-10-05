@@ -65,4 +65,7 @@ class TestMiniSpeedMatrix:
     def test_smoke_budget_small(self):
         for p in MINIS:
             c = json.load(open(p))
-            assert c["max_steps"] <= 500 and c["resume_every"] == 0
+            # r122 finding #79: resume_every==0 is REJECTED by validate_config
+            # (">=1 when provided"); the real invariant is "no resume saves
+            # inside the smoke budget", i.e. resume_every > max_steps.
+            assert c["max_steps"] <= 500 and c["resume_every"] > c["max_steps"]
