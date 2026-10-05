@@ -29,7 +29,7 @@
   "val_every": 100,
   "svd_every": 2500,
   "val_batches": 100,
-  "resume_every": 0,
+  "resume_every": 100000,
   "save_every": 0,
   "keep_last_checkpoints": 2,
   "min_free_gb": 5.0,
