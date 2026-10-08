@@ -26,6 +26,7 @@ from __future__ import annotations
 import glob
 import json
 import os
+import re
 
 import pytest
 
@@ -129,3 +130,61 @@ def test_init_ckpt_embeds_own_seed(path):
     config = json.load(open(path))
     name = os.path.basename(config["init_ckpt"])
     assert re.search(rf"_s{config['seed']}[._]", name), (name, config["seed"])
+
+
+# --- Находка #80 (r129, боевой MINI_SMOKE 2026-10-05): mini/speed конфиги ---
+# унаследовали init_ckpt=/kaggle/working/inits/init_200m_s42_*.pt от научной
+# пары: 124M-конфиг указывал на 200M-инит (shape-несовместимый), а смок-ячейки
+# иниты не генерируют (их генерирует ТОЛЬКО RUN200M). Все 3 плеча упали
+# FileNotFoundError до тренера. Контракты ниже закрывают КЛАСС, не экземпляр.
+
+SMOKE_SPEED_PATTERNS = ("mini_124m_", "gpu_mini_124m_", "gpu_200m_", "_speed_", "kaggle_smoke_")
+
+
+@pytest.mark.parametrize("path", [p for p in CONFIGS
+                                  if any(t in os.path.basename(p) for t in SMOKE_SPEED_PATTERNS)],
+                         ids=lambda p: os.path.basename(p))
+def test_speed_smoke_surfaces_carry_no_init_ckpt(path):
+    """Speed/smoke surfaces measure throughput, not science: the model
+    constructor already zero-initialises every mechanism tensor (identity
+    by construction, instance-verified r121), so no init file is needed —
+    and no launching cell generates one. Any init_ckpt here is a landmine."""
+    config = json.load(open(path))
+    assert "init_ckpt" not in config, (path, config.get("init_ckpt"))
+
+
+@pytest.mark.parametrize("path", [p for p in CONFIGS
+                                  if os.path.basename(p).startswith("kaggle_200m_")
+                                  and "init_ckpt" in json.load(open(p))],
+                         ids=lambda p: os.path.basename(p))
+def test_kaggle200m_science_init_matches_run200m_template(path):
+    """RUN200M_ONE_CELL is the only cell that creates /kaggle/working/inits/*
+    today, with the exact template init_200m_s{seed}_{arm}.pt. The 9h science
+    pairs must match it or they die with FileNotFoundError on device."""
+    import re
+    config = json.load(open(path))
+    name = os.path.basename(config["init_ckpt"])
+    assert config["model"]["n_embd"] == 1024, path
+    assert re.fullmatch(rf"init_200m_s{config['seed']}_(base|hla)\.pt", name), (path, name)
+
+
+_SCALE = re.compile(r"_(\d{3,4})m")
+
+
+@pytest.mark.parametrize("path", [p for p in CONFIGS if "init_ckpt" in json.load(open(p))],
+                         ids=lambda p: os.path.basename(p))
+def test_init_ckpt_scale_token_matches_config_scale(path):
+    """The exact #80 failure mode: a 124M config borrowing a _200m_ init
+    (shape-incompatible). If BOTH the config filename and the init filename
+    carry an NNNm scale token, they must agree. Legacy naming eras without
+    a token in the init name are out of scope here (covered by their own
+    historical cells), as are *_template.json blueprints."""
+    if path.endswith("_template.json"):
+        return
+    config = json.load(open(path))
+    cfg_tok = _SCALE.search(os.path.basename(path))
+    init_tok = _SCALE.search(os.path.basename(config["init_ckpt"]))
+    if cfg_tok and init_tok:
+        assert cfg_tok.group(1) == init_tok.group(1), (
+            path, config["init_ckpt"], "scale mismatch — finding #80 class")
+
