@@ -5,7 +5,6 @@
   "run_name": "gpu_mini_124m_hla_flash_fold_s42",
   "train_path": "data/train_fixed_tokens.bin",
   "val_path": "data/val_fixed_tokens.bin",
-  "init_ckpt": "/kaggle/working/inits/init_200m_s42_hla.pt",
   "init_strict": true,
   "check_init_hla_identity": true,
   "expected_vocab_size": 50257,
