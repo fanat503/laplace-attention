@@ -1,0 +1,232 @@
+diff --git a/configs/gpu_200m_base_flash_s42.json b/configs/gpu_200m_base_flash_s42.json
+index ae48ba4..c242cd6 100644
+--- a/configs/gpu_200m_base_flash_s42.json
++++ b/configs/gpu_200m_base_flash_s42.json
+@@ -5,7 +5,6 @@
+   "run_name": "gpu_200m_base_flash_s42",
+   "train_path": "/kaggle/input/hla-c4-tokens/train_fixed_tokens.bin",
+   "val_path": "/kaggle/input/hla-c4-tokens/val_fixed_tokens.bin",
+-  "init_ckpt": "/kaggle/working/inits/init_200m_s42_base.pt",
+   "init_strict": true,
+   "check_init_hla_identity": true,
+   "expected_vocab_size": 50257,
+diff --git a/configs/gpu_200m_hla_flash_fold_s42.json b/configs/gpu_200m_hla_flash_fold_s42.json
+index e6fe1ca..c0e3890 100644
+--- a/configs/gpu_200m_hla_flash_fold_s42.json
++++ b/configs/gpu_200m_hla_flash_fold_s42.json
+@@ -5,7 +5,6 @@
+   "run_name": "gpu_200m_hla_flash_fold_s42",
+   "train_path": "/kaggle/input/hla-c4-tokens/train_fixed_tokens.bin",
+   "val_path": "/kaggle/input/hla-c4-tokens/val_fixed_tokens.bin",
+-  "init_ckpt": "/kaggle/working/inits/init_200m_s42_hla.pt",
+   "init_strict": true,
+   "check_init_hla_identity": true,
+   "expected_vocab_size": 50257,
+diff --git a/configs/gpu_mini_124m_base_flash_s42.json b/configs/gpu_mini_124m_base_flash_s42.json
+index 2c7dd4e..332ebcf 100644
+--- a/configs/gpu_mini_124m_base_flash_s42.json
++++ b/configs/gpu_mini_124m_base_flash_s42.json
+@@ -5,7 +5,6 @@
+   "run_name": "gpu_mini_124m_base_flash_s42",
+   "train_path": "data/train_fixed_tokens.bin",
+   "val_path": "data/val_fixed_tokens.bin",
+-  "init_ckpt": "/kaggle/working/inits/init_200m_s42_base.pt",
+   "init_strict": true,
+   "check_init_hla_identity": true,
+   "expected_vocab_size": 50257,
+diff --git a/configs/gpu_mini_124m_hla_flash_fold_s42.json b/configs/gpu_mini_124m_hla_flash_fold_s42.json
+index fafe61c..3ab9620 100644
+--- a/configs/gpu_mini_124m_hla_flash_fold_s42.json
++++ b/configs/gpu_mini_124m_hla_flash_fold_s42.json
+@@ -5,7 +5,6 @@
+   "run_name": "gpu_mini_124m_hla_flash_fold_s42",
+   "train_path": "data/train_fixed_tokens.bin",
+   "val_path": "data/val_fixed_tokens.bin",
+-  "init_ckpt": "/kaggle/working/inits/init_200m_s42_hla.pt",
+   "init_strict": true,
+   "check_init_hla_identity": true,
+   "expected_vocab_size": 50257,
+diff --git a/configs/kaggle_200m_base_speed_sdpa_s42.json b/configs/kaggle_200m_base_speed_sdpa_s42.json
+index 0a4895c..f4d925d 100644
+--- a/configs/kaggle_200m_base_speed_sdpa_s42.json
++++ b/configs/kaggle_200m_base_speed_sdpa_s42.json
+@@ -5,7 +5,6 @@
+   "run_name": "kaggle_200m_base_speed_sdpa_s42",
+   "train_path": "/kaggle/input/hla-c4-tokens/train_fixed_tokens.bin",
+   "val_path": "/kaggle/input/hla-c4-tokens/val_fixed_tokens.bin",
+-  "init_ckpt": "/kaggle/working/inits/init_200m_s42_base.pt",
+   "init_strict": true,
+   "check_init_hla_identity": true,
+   "expected_vocab_size": 50257,
+diff --git a/configs/kaggle_200m_hla_speed_fold_s42.json b/configs/kaggle_200m_hla_speed_fold_s42.json
+index 6da7dbd..f584c1f 100644
+--- a/configs/kaggle_200m_hla_speed_fold_s42.json
++++ b/configs/kaggle_200m_hla_speed_fold_s42.json
+@@ -5,7 +5,6 @@
+   "run_name": "kaggle_200m_hla_speed_fold_s42",
+   "train_path": "/kaggle/input/hla-c4-tokens/train_fixed_tokens.bin",
+   "val_path": "/kaggle/input/hla-c4-tokens/val_fixed_tokens.bin",
+-  "init_ckpt": "/kaggle/working/inits/init_200m_s42_hla.pt",
+   "init_strict": true,
+   "check_init_hla_identity": true,
+   "expected_vocab_size": 50257,
+diff --git a/configs/kaggle_200m_hla_speed_pallas_s42.json b/configs/kaggle_200m_hla_speed_pallas_s42.json
+index c99ab1e..bf44e7a 100644
+--- a/configs/kaggle_200m_hla_speed_pallas_s42.json
++++ b/configs/kaggle_200m_hla_speed_pallas_s42.json
+@@ -5,7 +5,6 @@
+   "run_name": "kaggle_200m_hla_speed_pallas_s42",
+   "train_path": "/kaggle/input/hla-c4-tokens/train_fixed_tokens.bin",
+   "val_path": "/kaggle/input/hla-c4-tokens/val_fixed_tokens.bin",
+-  "init_ckpt": "/kaggle/working/inits/init_200m_s42_hla.pt",
+   "init_strict": true,
+   "check_init_hla_identity": true,
+   "expected_vocab_size": 50257,
+diff --git a/configs/kaggle_smoke_base_s42.json b/configs/kaggle_smoke_base_s42.json
+index 032b98b..5c2e8de 100644
+--- a/configs/kaggle_smoke_base_s42.json
++++ b/configs/kaggle_smoke_base_s42.json
+@@ -5,7 +5,6 @@
+   "run_name": "kaggle_smoke_base_s42",
+   "train_path": "/kaggle/input/hla-c4-tokens/train_fixed_tokens.bin",
+   "val_path": "/kaggle/input/hla-c4-tokens/val_fixed_tokens.bin",
+-  "init_ckpt": "/kaggle/working/inits/init_smoke_s42_base.pt",
+   "init_strict": true,
+   "check_init_hla_identity": true,
+   "expected_vocab_size": 50257,
+@@ -72,4 +71,4 @@
+     "baseline_type": "base_pm_ablated_v2"
+   },
+   "variant": "base_pm_ablated_v2"
+-}
++}
+\ No newline at end of file
+diff --git a/configs/kaggle_smoke_hla_s42.json b/configs/kaggle_smoke_hla_s42.json
+index 0f8b9f9..8fdfc34 100644
+--- a/configs/kaggle_smoke_hla_s42.json
++++ b/configs/kaggle_smoke_hla_s42.json
+@@ -5,7 +5,6 @@
+   "run_name": "kaggle_smoke_hla_s42",
+   "train_path": "/kaggle/input/hla-c4-tokens/train_fixed_tokens.bin",
+   "val_path": "/kaggle/input/hla-c4-tokens/val_fixed_tokens.bin",
+-  "init_ckpt": "/kaggle/working/inits/init_smoke_s42_hla.pt",
+   "init_strict": true,
+   "check_init_hla_identity": true,
+   "expected_vocab_size": 50257,
+@@ -72,4 +71,4 @@
+     "baseline_type": "hla_v2_aggressive_gates_salience"
+   },
+   "variant": "hla_v2_aggressive_gates_salience"
+-}
++}
+\ No newline at end of file
+diff --git a/configs/mini_124m_base_sdpa_s42.json b/configs/mini_124m_base_sdpa_s42.json
+index 7f3cc2a..c8682cb 100644
+--- a/configs/mini_124m_base_sdpa_s42.json
++++ b/configs/mini_124m_base_sdpa_s42.json
+@@ -5,7 +5,6 @@
+   "run_name": "mini_124m_base_sdpa_s42",
+   "train_path": "/kaggle/input/hla-c4-tokens/train_fixed_tokens.bin",
+   "val_path": "/kaggle/input/hla-c4-tokens/val_fixed_tokens.bin",
+-  "init_ckpt": "/kaggle/working/inits/init_200m_s42_base.pt",
+   "init_strict": true,
+   "check_init_hla_identity": true,
+   "expected_vocab_size": 50257,
+diff --git a/configs/mini_124m_hla_fold_s42.json b/configs/mini_124m_hla_fold_s42.json
+index 731816e..8d6f083 100644
+--- a/configs/mini_124m_hla_fold_s42.json
++++ b/configs/mini_124m_hla_fold_s42.json
+@@ -5,7 +5,6 @@
+   "run_name": "mini_124m_hla_fold_s42",
+   "train_path": "/kaggle/input/hla-c4-tokens/train_fixed_tokens.bin",
+   "val_path": "/kaggle/input/hla-c4-tokens/val_fixed_tokens.bin",
+-  "init_ckpt": "/kaggle/working/inits/init_200m_s42_hla.pt",
+   "init_strict": true,
+   "check_init_hla_identity": true,
+   "expected_vocab_size": 50257,
+diff --git a/configs/mini_124m_hla_pallas_s42.json b/configs/mini_124m_hla_pallas_s42.json
+index f48e64e..dad72fa 100644
+--- a/configs/mini_124m_hla_pallas_s42.json
++++ b/configs/mini_124m_hla_pallas_s42.json
+@@ -5,7 +5,6 @@
+   "run_name": "mini_124m_hla_pallas_s42",
+   "train_path": "/kaggle/input/hla-c4-tokens/train_fixed_tokens.bin",
+   "val_path": "/kaggle/input/hla-c4-tokens/val_fixed_tokens.bin",
+-  "init_ckpt": "/kaggle/working/inits/init_200m_s42_hla.pt",
+   "init_strict": true,
+   "check_init_hla_identity": true,
+   "expected_vocab_size": 50257,
+diff --git a/tests/test_config_validation.py b/tests/test_config_validation.py
+index 200a5cf..f6780e8 100644
+--- a/tests/test_config_validation.py
++++ b/tests/test_config_validation.py
+@@ -26,6 +26,7 @@ from __future__ import annotations
+ import glob
+ import json
+ import os
++import re
+ 
+ import pytest
+ 
+@@ -129,3 +130,61 @@ def test_init_ckpt_embeds_own_seed(path):
+     config = json.load(open(path))
+     name = os.path.basename(config["init_ckpt"])
+     assert re.search(rf"_s{config['seed']}[._]", name), (name, config["seed"])
++
++
++# --- Находка #80 (r129, боевой MINI_SMOKE 2026-10-05): mini/speed конфиги ---
++# унаследовали init_ckpt=/kaggle/working/inits/init_200m_s42_*.pt от научной
++# пары: 124M-конфиг указывал на 200M-инит (shape-несовместимый), а смок-ячейки
++# иниты не генерируют (их генерирует ТОЛЬКО RUN200M). Все 3 плеча упали
++# FileNotFoundError до тренера. Контракты ниже закрывают КЛАСС, не экземпляр.
++
++SMOKE_SPEED_PATTERNS = ("mini_124m_", "gpu_mini_124m_", "gpu_200m_", "_speed_", "kaggle_smoke_")
++
++
++@pytest.mark.parametrize("path", [p for p in CONFIGS
++                                  if any(t in os.path.basename(p) for t in SMOKE_SPEED_PATTERNS)],
++                         ids=lambda p: os.path.basename(p))
++def test_speed_smoke_surfaces_carry_no_init_ckpt(path):
++    """Speed/smoke surfaces measure throughput, not science: the model
++    constructor already zero-initialises every mechanism tensor (identity
++    by construction, instance-verified r121), so no init file is needed —
++    and no launching cell generates one. Any init_ckpt here is a landmine."""
++    config = json.load(open(path))
++    assert "init_ckpt" not in config, (path, config.get("init_ckpt"))
++
++
++@pytest.mark.parametrize("path", [p for p in CONFIGS
++                                  if os.path.basename(p).startswith("kaggle_200m_")
++                                  and "init_ckpt" in json.load(open(p))],
++                         ids=lambda p: os.path.basename(p))
++def test_kaggle200m_science_init_matches_run200m_template(path):
++    """RUN200M_ONE_CELL is the only cell that creates /kaggle/working/inits/*
++    today, with the exact template init_200m_s{seed}_{arm}.pt. The 9h science
++    pairs must match it or they die with FileNotFoundError on device."""
++    import re
++    config = json.load(open(path))
++    name = os.path.basename(config["init_ckpt"])
++    assert config["model"]["n_embd"] == 1024, path
++    assert re.fullmatch(rf"init_200m_s{config['seed']}_(base|hla)\.pt", name), (path, name)
++
++
++_SCALE = re.compile(r"_(\d{3,4})m")
++
++
++@pytest.mark.parametrize("path", [p for p in CONFIGS if "init_ckpt" in json.load(open(p))],
++                         ids=lambda p: os.path.basename(p))
++def test_init_ckpt_scale_token_matches_config_scale(path):
++    """The exact #80 failure mode: a 124M config borrowing a _200m_ init
++    (shape-incompatible). If BOTH the config filename and the init filename
++    carry an NNNm scale token, they must agree. Legacy naming eras without
++    a token in the init name are out of scope here (covered by their own
++    historical cells), as are *_template.json blueprints."""
++    if path.endswith("_template.json"):
++        return
++    config = json.load(open(path))
++    cfg_tok = _SCALE.search(os.path.basename(path))
++    init_tok = _SCALE.search(os.path.basename(config["init_ckpt"]))
++    if cfg_tok and init_tok:
++        assert cfg_tok.group(1) == init_tok.group(1), (
++            path, config["init_ckpt"], "scale mismatch — finding #80 class")
++
