@@ -99,9 +99,10 @@ class SwiGLU(nn.Module):
             h = F.silu(self.w1(x)) * self.w2(x)
         out = self.w3(h)
         if self.capture_diagnostics:
-            with torch.no_grad():
-                self.last_hidden = h.detach()
-                self.last_mlp_out_norm = out.detach().float().pow(2).mean(dim=-1).sqrt().mean()
+            if not getattr(self, "mech_fast_math", False):
+                with torch.no_grad():
+                    self.last_hidden = h.detach()
+                    self.last_mlp_out_norm = out.detach().float().pow(2).mean(dim=-1).sqrt().mean()
         return out
 
 
@@ -123,6 +124,8 @@ class CausalSelfAttention(nn.Module):
         self.use_rope = bool(getattr(config, "use_rope", False))
         self.rope_theta = float(getattr(config, "rope_theta", 10000.0))
         self.attention_backend = getattr(config, "attention_backend", "manual")
+        self.fold_pad_multiple = int(getattr(config, "fold_pad_multiple", 0) or 0)
+        self.mech_fast_math = bool(getattr(config, "mech_fast_math", False))
         self.layer_dependent_gate = bool(getattr(config, "layer_dependent_gate", False))
         # Static heuristic multiplier: deeper layers get wider gate envelopes.
         self.layer_gate_multiplier = (
@@ -340,6 +343,22 @@ class CausalSelfAttention(nn.Module):
                 )
             self.last_mechanism_grad_norms = norms
 
+
+    def _fast_gates(self, x):
+        """r136 fast-math: один GEMM для всех активных C->H гейт-проекций
+        (bisect: шесть мелких Linear на слой ломали XLA-фьюжн)."""
+        ws, keys = [], []
+        if self.use_laplace and self.laplace_alpha != 0.0:
+            ws += [self.W_gate_k.weight, self.W_gate_v.weight]; keys += ["k", "v"]
+        if self.use_distance_laplace and self.distance_laplace_alpha != 0.0:
+            ws += [self.W_gate_d.weight]; keys += ["d"]
+        if self.use_salience_bias and self.salience_alpha != 0.0:
+            ws += [self.W_gate_sal.weight]; keys += ["sal"]
+        if not ws:
+            return {}
+        g = torch.tanh(F.linear(x, torch.cat(ws, 0)))
+        return dict(zip(keys, g.split(self.n_head, dim=-1)))
+
     @staticmethod
     def _rotate_pairwise(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.Tensor:
         x_real, x_imag = x.chunk(2, dim=-1)
@@ -368,6 +387,7 @@ class CausalSelfAttention(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         B, T, C = x.size()
+        self._fg = self._fast_gates(x) if self.mech_fast_math else None
         hs = self.head_dim
 
         if self.mask.size(-1) < T:
@@ -391,13 +411,18 @@ class CausalSelfAttention(nn.Module):
             layer_mult = 1.0 + depth * temp.squeeze(0)
 
         if self.phase_mult != 0.0:
-            x_float = x.float()
-            raw_angles_q = torch.einsum("btd,hdk->bhtk", x_float, self.W_phase_q.float())
-            raw_angles_k = torch.einsum("btd,hdk->bhtk", x_float, self.W_phase_k.float())
+            if self.mech_fast_math:
+                _w2 = torch.stack((self.W_phase_q, self.W_phase_k)).to(x.dtype)
+                raw_angles_q, raw_angles_k = torch.einsum(
+                    "btd,shdk->sbhtk", x, _w2).unbind(0)
+            else:
+                x_float = x.float()
+                raw_angles_q = torch.einsum("btd,hdk->bhtk", x_float, self.W_phase_q.float())
+                raw_angles_k = torch.einsum("btd,hdk->bhtk", x_float, self.W_phase_k.float())
 
             if self.per_head_phase:
                 # phase_mult_eff[h] in [0, 2*phase_mult]; exactly phase_mult at init.
-                head_budget = 1.0 + torch.tanh(self.W_phase_scale.float())  # (H,)
+                head_budget = 1.0 + torch.tanh(self.W_phase_scale if self.mech_fast_math else self.W_phase_scale.float())  # (H,)
                 phase_scale = (math.pi * self.phase_mult) * head_budget.view(1, self.n_head, 1, 1)
             else:
                 phase_scale = math.pi * self.phase_mult
@@ -416,13 +441,14 @@ class CausalSelfAttention(nn.Module):
             q = self._rotate_pairwise(q, cos_q, sin_q)
             k_rot = self._rotate_pairwise(k, cos_k, sin_k)
 
-            with torch.no_grad():
-                self.last_angle_q_abs_mean = angles_q.detach().abs().mean()
-                self.last_angle_k_abs_mean = angles_k.detach().abs().mean()
-                tq = torch.tanh(raw_angles_q.detach()).abs()
-                tk = torch.tanh(raw_angles_k.detach()).abs()
-                self.last_angle_q_sat_frac = (tq > 0.99).float().mean()
-                self.last_angle_k_sat_frac = (tk > 0.99).float().mean()
+            if not getattr(self, "mech_fast_math", False):
+                with torch.no_grad():
+                    self.last_angle_q_abs_mean = angles_q.detach().abs().mean()
+                    self.last_angle_k_abs_mean = angles_k.detach().abs().mean()
+                    tq = torch.tanh(raw_angles_q.detach()).abs()
+                    tk = torch.tanh(raw_angles_k.detach()).abs()
+                    self.last_angle_q_sat_frac = (tq > 0.99).float().mean()
+                    self.last_angle_k_sat_frac = (tk > 0.99).float().mean()
                 # Nanda attack: a mean |angle| of 0.1 can be "all angles 0.1"
                 # or "half 0, half 0.2" - std distinguishes uniform use of the
                 # budget from a bimodal on/off pattern.
@@ -430,14 +456,15 @@ class CausalSelfAttention(nn.Module):
                 self.last_angle_k_std = angles_k.detach().float().std()
         else:
             k_rot = k
-            with torch.no_grad():
-                zero = torch.zeros((), device=x.device)
-                self.last_angle_q_abs_mean = zero
-                self.last_angle_k_abs_mean = zero
-                self.last_angle_q_sat_frac = zero
-                self.last_angle_k_sat_frac = zero
-                self.last_angle_q_std = zero
-                self.last_angle_k_std = zero
+            if not getattr(self, "mech_fast_math", False):
+                with torch.no_grad():
+                    zero = torch.zeros((), device=x.device)
+                    self.last_angle_q_abs_mean = zero
+                    self.last_angle_k_abs_mean = zero
+                    self.last_angle_q_sat_frac = zero
+                    self.last_angle_k_sat_frac = zero
+                    self.last_angle_q_std = zero
+                    self.last_angle_k_std = zero
 
         k = k_rot
 
@@ -453,22 +480,24 @@ class CausalSelfAttention(nn.Module):
                                    min=-self.qtemp_clip, max=self.qtemp_clip)
             temp_q = torch.exp(log_temp).to(q.dtype).transpose(1, 2).unsqueeze(-1)
             q = q * temp_q                                              # (B,H,T,1)
-            with torch.no_grad():
-                self.last_qtemp_mean = temp_q.detach().float().mean()
-                self.last_qtemp_sat_frac = (gate_q.detach().abs() > 0.99).float().mean()
+            if not getattr(self, "mech_fast_math", False):
+                with torch.no_grad():
+                    self.last_qtemp_mean = temp_q.detach().float().mean()
+                    self.last_qtemp_sat_frac = (gate_q.detach().abs() > 0.99).float().mean()
         else:
-            with torch.no_grad():
-                one = torch.ones((), device=x.device)
-                zero = torch.zeros((), device=x.device)
-                self.last_qtemp_mean = one
-                self.last_qtemp_sat_frac = zero
+            if not getattr(self, "mech_fast_math", False):
+                with torch.no_grad():
+                    one = torch.ones((), device=x.device)
+                    zero = torch.zeros((), device=x.device)
+                    self.last_qtemp_mean = one
+                    self.last_qtemp_sat_frac = zero
 
 
         if self.use_laplace and self.laplace_alpha != 0.0:
 
-            gate_k = torch.tanh(self.W_gate_k(x)).float()  # (B, T, H)
+            gate_k = self._fg["k"] if self._fg is not None else torch.tanh(self.W_gate_k(x)).float()  # (B, T, H)
             range_k = (self.laplace_range_k * layer_mult) * (
-                1.0 + self.range_flex * torch.tanh(self.W_range_k.float())
+                1.0 + self.range_flex * torch.tanh(self.W_range_k if self._fg is not None else self.W_range_k.float())
             )  # (H,)
             range_k = range_k.view(1, 1, self.n_head)
 
@@ -483,9 +512,9 @@ class CausalSelfAttention(nn.Module):
             mix_k = mix_k.to(k.dtype).transpose(1, 2).unsqueeze(-1)  # (B, H, T, 1)
             k = k_rot * mix_k
 
-            gate_v = torch.tanh(self.W_gate_v(x)).float()  # (B, T, H)
+            gate_v = self._fg["v"] if self._fg is not None else torch.tanh(self.W_gate_v(x)).float()  # (B, T, H)
             range_v = (self.laplace_range_v * layer_mult) * (
-                1.0 + self.range_flex * torch.tanh(self.W_range_v.float())
+                1.0 + self.range_flex * torch.tanh(self.W_range_v if self._fg is not None else self.W_range_v.float())
             )  # (H,)
             range_v = range_v.view(1, 1, self.n_head)
 
@@ -500,13 +529,14 @@ class CausalSelfAttention(nn.Module):
             mix_v = mix_v.to(v.dtype).transpose(1, 2).unsqueeze(-1)  # (B, H, T, 1)
             v = v * mix_v
 
-            with torch.no_grad():
-                self.last_gate_k_mean = gate_k.detach().mean()
-                self.last_gate_v_mean = gate_v.detach().mean()
-                self.last_mix_k_mean = mix_k.detach().float().mean()
-                self.last_mix_v_mean = mix_v.detach().float().mean()
-                self.last_gate_k_sat_frac = (gate_k.detach().abs() > 0.99).float().mean()
-                self.last_gate_v_sat_frac = (gate_v.detach().abs() > 0.99).float().mean()
+            if not getattr(self, "mech_fast_math", False):
+                with torch.no_grad():
+                    self.last_gate_k_mean = gate_k.detach().mean()
+                    self.last_gate_v_mean = gate_v.detach().mean()
+                    self.last_mix_k_mean = mix_k.detach().float().mean()
+                    self.last_mix_v_mean = mix_v.detach().float().mean()
+                    self.last_gate_k_sat_frac = (gate_k.detach().abs() > 0.99).float().mean()
+                    self.last_gate_v_sat_frac = (gate_v.detach().abs() > 0.99).float().mean()
                 # |gate| means: signed means can sit near 0 while the gate is
                 # highly active (symmetric up/down usage). Underuse detector:
                 # abs_mean ~ 0 => mechanism is OFF; sat_frac high => envelope
@@ -519,17 +549,18 @@ class CausalSelfAttention(nn.Module):
                     self.last_mix_k = mix_k.detach()
                     self.last_mix_v = mix_v.detach()
         else:
-            with torch.no_grad():
-                zero = torch.zeros((), device=x.device)
-                one = torch.ones((), device=x.device)
-                self.last_gate_k_mean = zero
-                self.last_gate_v_mean = zero
-                self.last_mix_k_mean = one
-                self.last_mix_v_mean = one
-                self.last_gate_k_sat_frac = zero
-                self.last_gate_v_sat_frac = zero
-                self.last_gate_k_abs_mean = zero
-                self.last_gate_v_abs_mean = zero
+            if not getattr(self, "mech_fast_math", False):
+                with torch.no_grad():
+                    zero = torch.zeros((), device=x.device)
+                    one = torch.ones((), device=x.device)
+                    self.last_gate_k_mean = zero
+                    self.last_gate_v_mean = zero
+                    self.last_mix_k_mean = one
+                    self.last_mix_v_mean = one
+                    self.last_gate_k_sat_frac = zero
+                    self.last_gate_v_sat_frac = zero
+                    self.last_gate_k_abs_mean = zero
+                    self.last_gate_v_abs_mean = zero
                 if self.capture_diagnostics:
                     self.last_gate_k = None
                     self.last_gate_v = None
@@ -587,30 +618,39 @@ class CausalSelfAttention(nn.Module):
             sd = math.sqrt(hs)
             extras_q, extras_k = [], []
             if self.use_distance_laplace and self.distance_laplace_alpha != 0.0:
-                gate_d = torch.tanh(self.W_gate_d(x)).float()  # (B, T, H)
-                pos_n = (torch.arange(T, device=x.device).float()
+                gate_d = (self._fg["d"] if self._fg is not None
+                          else torch.tanh(self.W_gate_d(x)).float())  # (B, T, H)
+                pos_n = (torch.arange(T, device=x.device)
+                         .to(x.dtype if self._fg is not None else torch.float32)
                          / float(max(1, self.block_size - 1)))
                 coef = (self.distance_laplace_alpha
                         * self.distance_laplace_range * layer_mult)
                 cg = (coef * gate_d).transpose(1, 2)  # (B, H, T)
                 extras_q.append((sd * pos_n).view(1, 1, T, 1)
                                 .expand(B, self.n_head, T, 1))
-                extras_q.append(q.new_full((B, self.n_head, T, 1), sd,
-                                           dtype=torch.float32))
+                extras_q.append(q.new_full(
+                    (B, self.n_head, T, 1), sd,
+                    dtype=q.dtype if self._fg is not None else torch.float32))
                 extras_k.append(cg.unsqueeze(-1))
                 extras_k.append((-pos_n.view(1, 1, T) * cg).unsqueeze(-1))
             if self.use_salience_bias and self.salience_alpha != 0.0:
-                gate_sal = torch.tanh(self.W_gate_sal(x)).float()  # (B, T, H)
+                gate_sal = (self._fg["sal"] if self._fg is not None
+                            else torch.tanh(self.W_gate_sal(x)).float())  # (B, T, H)
                 sal = (self.salience_alpha * self.salience_range
                        * gate_sal).transpose(1, 2)  # (B, H, T)
-                extras_q.append(q.new_full((B, self.n_head, T, 1), sd,
-                                           dtype=torch.float32))
+                extras_q.append(q.new_full(
+                    (B, self.n_head, T, 1), sd,
+                    dtype=q.dtype if self._fg is not None else torch.float32))
                 extras_k.append(sal.unsqueeze(-1))
             if extras_q:
                 qf = torch.cat([q] + [e.to(q.dtype) for e in extras_q], dim=-1)
                 kf = torch.cat([k] + [e.to(k.dtype) for e in extras_k], dim=-1)
             else:
                 qf, kf = q, k
+            if self.fold_pad_multiple > 0 and qf.size(-1) % self.fold_pad_multiple != 0:
+                _pad = self.fold_pad_multiple - qf.size(-1) % self.fold_pad_multiple
+                qf = F.pad(qf, (0, _pad))
+                kf = F.pad(kf, (0, _pad))
             if self.attention_backend == "pallas":
                 # TPU path: torch_xla Pallas flash-attention kernel. The fold
                 # makes it legal: biases live INSIDE q'/k', the kernel only
@@ -621,9 +661,18 @@ class CausalSelfAttention(nn.Module):
                 from torch_xla.experimental.custom_kernel import flash_attention
                 y = flash_attention(qf, kf, v, causal=True, sm_scale=scale)
             else:
-                y = F.scaled_dot_product_attention(
-                    qf, kf, v, attn_mask=None, dropout_p=0.0,
-                    is_causal=True, scale=scale)
+                if self._fg is not None:
+                    # r137 O4: явный scale у XLA-SDPA — кандидат на вылет из
+                    # fused-пути. Точный трюк: qf *= scale*sqrt(E) и дефолтный
+                    # scale 1/sqrt(E) даёт ИДЕНТИЧНОЕ произведение (скаляр).
+                    qf = qf * (scale * math.sqrt(qf.size(-1)))
+                    y = F.scaled_dot_product_attention(
+                        qf, kf, v, attn_mask=None, dropout_p=0.0,
+                        is_causal=True)
+                else:
+                    y = F.scaled_dot_product_attention(
+                        qf, kf, v, attn_mask=None, dropout_p=0.0,
+                        is_causal=True, scale=scale)
             y = y.transpose(1, 2).contiguous().view(B, T, C)
             return self.c_proj(y)
 
@@ -694,17 +743,19 @@ class CausalSelfAttention(nn.Module):
                 dist_bias = dist[None, None, :, :] * key_gate * coef
                 dist_bias = torch.clamp(dist_bias, min=-clip_d, max=clip_d)
                 att = att + dist_bias.to(att.dtype)
-                with torch.no_grad():
-                    self.last_distance_bias_mean = dist_bias.detach().float().mean()
-                    self.last_distance_bias_abs_mean = dist_bias.detach().float().abs().mean()
+                if not getattr(self, "mech_fast_math", False):
+                    with torch.no_grad():
+                        self.last_distance_bias_mean = dist_bias.detach().float().mean()
+                        self.last_distance_bias_abs_mean = dist_bias.detach().float().abs().mean()
                     if self.capture_diagnostics:
                         self.last_gate_d = gate_d.detach()
         elif self.capture_diagnostics:
-            with torch.no_grad():
-                zero = torch.zeros((), device=x.device)
-                self.last_distance_bias_mean = zero
-                self.last_distance_bias_abs_mean = zero
-                self.last_gate_d = None
+            if not getattr(self, "mech_fast_math", False):
+                with torch.no_grad():
+                    zero = torch.zeros((), device=x.device)
+                    self.last_distance_bias_mean = zero
+                    self.last_distance_bias_abs_mean = zero
+                    self.last_gate_d = None
 
         if self.use_salience_bias and self.salience_alpha != 0.0:
             # Additive per-key salience: strong suppression/boost independent of
@@ -715,20 +766,22 @@ class CausalSelfAttention(nn.Module):
             sal_bias = torch.clamp(sal_bias, min=-self.salience_clip, max=self.salience_clip)
             sal_bias = sal_bias.transpose(1, 2).unsqueeze(2)  # (B, H, 1, T_key)
             att = att + sal_bias.to(att.dtype)
-            with torch.no_grad():
-                self.last_salience_bias_abs_mean = sal_bias.detach().float().abs().mean()
-                self.last_salience_sat_frac = (gate_sal.detach().abs() > 0.99).float().mean()
+            if not getattr(self, "mech_fast_math", False):
+                with torch.no_grad():
+                    self.last_salience_bias_abs_mean = sal_bias.detach().float().abs().mean()
+                    self.last_salience_sat_frac = (gate_sal.detach().abs() > 0.99).float().mean()
                 if self.capture_diagnostics:
                     # Full per-token tensor for the gate-redundancy probe
                     # (round 7): do the four content gates learn the same
                     # function or four different ones?
                     self.last_gate_sal = gate_sal.detach()
         elif self.capture_diagnostics:
-            with torch.no_grad():
-                zero = torch.zeros((), device=x.device)
-                self.last_salience_bias_abs_mean = zero
-                self.last_salience_sat_frac = zero
-                self.last_gate_sal = None
+            if not getattr(self, "mech_fast_math", False):
+                with torch.no_grad():
+                    zero = torch.zeros((), device=x.device)
+                    self.last_salience_bias_abs_mean = zero
+                    self.last_salience_sat_frac = zero
+                    self.last_gate_sal = None
 
         if self.use_forget_gate and self.forget_alpha != 0.0:
             # FoX-style cumulative gate (identity at init: W_gate_f = 0).
@@ -749,14 +802,16 @@ class CausalSelfAttention(nn.Module):
             forget_bias = S.unsqueeze(-1) - S.unsqueeze(-2)         # (B,H,T_q,T_k) = S_i - S_j
             forget_bias = torch.clamp(forget_bias, min=-self.forget_clip, max=self.forget_clip)
             att = att + forget_bias.to(att.dtype)
-            with torch.no_grad():
-                self.last_forget_bias_abs_mean = forget_bias.detach().float().abs().mean()
-                self.last_forget_sat_frac = (gate_f.detach().abs() > 0.99).float().mean()
+            if not getattr(self, "mech_fast_math", False):
+                with torch.no_grad():
+                    self.last_forget_bias_abs_mean = forget_bias.detach().float().abs().mean()
+                    self.last_forget_sat_frac = (gate_f.detach().abs() > 0.99).float().mean()
         elif self.capture_diagnostics:
-            with torch.no_grad():
-                zero = torch.zeros((), device=x.device)
-                self.last_forget_bias_abs_mean = zero
-                self.last_forget_sat_frac = zero
+            if not getattr(self, "mech_fast_math", False):
+                with torch.no_grad():
+                    zero = torch.zeros((), device=x.device)
+                    self.last_forget_bias_abs_mean = zero
+                    self.last_forget_sat_frac = zero
 
         mask = self.mask[:, :, :T, :T]
         att = att.masked_fill(~mask, float("-inf"))
@@ -781,10 +836,11 @@ class CausalSelfAttention(nn.Module):
         # 16 GB/core. Entropy is a PROBE - probes opt in via
         # set_diagnostics(True) (all eval.py probes already do).
         if self.capture_diagnostics:
-            with torch.no_grad():
-                p = att.detach().float().clamp(min=1e-9)
-                entropy = -(p * p.log()).sum(dim=-1).mean(dim=(0, 2))  # (H,)
-                self.last_entropy = entropy.detach()
+            if not getattr(self, "mech_fast_math", False):
+                with torch.no_grad():
+                    p = att.detach().float().clamp(min=1e-9)
+                    entropy = -(p * p.log()).sum(dim=-1).mean(dim=(0, 2))  # (H,)
+                    self.last_entropy = entropy.detach()
                 if self.capture_attention:
                     self.last_attn = att.detach().float()
                 elif self.capture_diagnostics:
@@ -794,8 +850,9 @@ class CausalSelfAttention(nn.Module):
         y = y.transpose(1, 2).contiguous().view(B, T, C)
         out = self.c_proj(y)
         if self.capture_diagnostics:
-            with torch.no_grad():
-                self.last_attn_out_norm = out.detach().float().pow(2).mean(dim=-1).sqrt().mean()
+            if not getattr(self, "mech_fast_math", False):
+                with torch.no_grad():
+                    self.last_attn_out_norm = out.detach().float().pow(2).mean(dim=-1).sqrt().mean()
         return out
 
 
@@ -895,7 +952,17 @@ class GPTConfig:
     gradient_checkpointing: bool = True
     fused_swiglu: bool = True
     ffn_hidden_multiple_of: int = 64
-    attention_backend: str = "manual"  # "manual" | "sdpa" | "sdpa_fold" | "pallas" (#30: rank-1 biases fold into qk; pallas = same fold through torch_xla Pallas flash kernel on TPU)
+    attention_backend: str = "manual"
+    # r135 draft O1 (finding #83/H1): pad folded q'/k' head dim with zeros up
+    # to a multiple of this value (0 = off). Zero columns contribute exactly
+    # zero to every dot product, so scores are unchanged; alignment lets
+    # fused SDPA/flash kernels keep their fast path (hs 67 -> 72 at 8).
+    fold_pad_multiple: int = 0
+    # r136 (bisect r134: phase -24%, gates -35%, extras -26% — распределённый
+    # налог fp32-апкастов и мелких GEMM). fast-math для SPEED-пути: механизмы
+    # в рабочем dtype + ВСЕ активные гейт-проекции одним GEMM + phase Q/K
+    # одним стекнутым einsum. default False = прежний путь бит-в-бит.
+    mech_fast_math: bool = False  # "manual" | "sdpa" | "sdpa_fold" | "pallas" (#30: rank-1 biases fold into qk; pallas = same fold through torch_xla Pallas flash kernel on TPU)
 
     baseline_type: str = "parameter_matched_ablated"
 
